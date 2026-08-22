@@ -25,6 +25,7 @@ const state = {
   currentId: null,
   models: [],
   currentVersion: null,
+  canPrint: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -184,6 +185,23 @@ $('mark-printed').onclick = async () => {
   await openProject(state.currentId);
 };
 
+$('print-btn').onclick = async () => {
+  if (state.currentId === null || state.currentVersion === null) return;
+  const model = state.models.find((m) => m.version === state.currentVersion);
+  const name = model?.title ? `「${model.title}」v${state.currentVersion}` : `v${state.currentVersion}`;
+  if (!confirm(`${name} をスライスして P2S で印刷を開始します。\nプリンタの準備（フィラメント・ベッド）は大丈夫ですか？`)) return;
+  setLoading(true, 'スライスしてプリンタへ送信しています…（数分かかることがあります）');
+  try {
+    await api(`/api/projects/${state.currentId}/models/${state.currentVersion}/print`, { method: 'POST' });
+    alert('印刷を開始しました！🎉');
+    await openProject(state.currentId);
+  } catch (e) {
+    alert(`印刷を開始できませんでした:\n${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
 // ---------- モデルプレビュー ----------
 
 function setModels(models) {
@@ -219,8 +237,18 @@ function selectVersion(version) {
   $('download-stl').href = stlUrl;
   $('download-scad').href = `/api/projects/${state.currentId}/models/${version}/scad`;
   $('download-stl').style.display = model.stl_path ? '' : 'none';
+  updatePrintButton();
   if (model.stl_path) loadSTL(stlUrl);
   else clearViewer();
+}
+
+function updatePrintButton() {
+  const model = state.models.find((m) => m.version === state.currentVersion);
+  const printable = !!(state.canPrint && model?.stl_path);
+  $('print-btn').classList.toggle('hidden', !printable);
+  $('print-hint').textContent = state.canPrint
+    ? 'ボタンひとつでスライス→P2Sへ送信→印刷開始まで行います。'
+    : 'STLをBambu Studioで開き、スライスしてP2Sに送信してください。';
 }
 
 // ---------- three.js ビューア ----------
@@ -311,6 +339,9 @@ async function loadSTL(url) {
 async function refreshPrinterStatus() {
   try {
     const s = await api('/api/printer/status');
+    const canPrintChanged = state.canPrint !== !!s.can_print;
+    state.canPrint = !!s.can_print;
+    if (canPrintChanged && state.currentVersion !== null) updatePrintButton();
     const el = $('printer-status');
     if (!s.configured) {
       el.textContent = '🖨 プリンタ: 未設定';
@@ -326,6 +357,10 @@ async function refreshPrinterStatus() {
 }
 
 // ---------- 初期化 ----------
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 refreshProjects();
 refreshPrinterStatus();

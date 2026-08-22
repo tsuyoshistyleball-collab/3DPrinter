@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import ai, db, modeling, printer
+from app import ai, db, modeling, printer, slicer
 
 app = FastAPI(title="AI Auto Modeling for Bambu Lab P2S")
 
@@ -188,11 +188,37 @@ def api_download_scad(project_id: int, version: int):
     return FileResponse(model["scad_path"], filename=name, media_type="text/plain")
 
 
-# ---------- プリンタ ----------
+# ---------- 印刷 ----------
 
 @app.get("/api/printer/status")
 def api_printer_status():
-    return printer.get_status()
+    status = printer.get_status()
+    status["can_print"] = slicer.slicer_configured() and printer.printer_configured()
+    return status
+
+
+@app.post("/api/projects/{project_id}/models/{version}/print")
+def api_print_model(project_id: int, version: int):
+    """STL をスライスしてプリンタへ送信し、印刷を開始する。"""
+    model = _model_or_404(project_id, version)
+    if not model["stl_path"] or not Path(model["stl_path"]).exists():
+        raise HTTPException(status_code=404, detail="STLファイルがありません")
+
+    stl_path = Path(model["stl_path"])
+    sliced_path = stl_path.parent / f"v{version}.gcode.3mf"
+
+    error = slicer.slice_stl(stl_path, sliced_path)
+    if error:
+        raise HTTPException(status_code=502, detail=error)
+
+    # プリンタ上でのファイル名（ASCII安全な名前にする）
+    remote_name = f"project{project_id}_v{version}.gcode.3mf"
+    error = printer.upload_and_print(sliced_path, remote_name)
+    if error:
+        raise HTTPException(status_code=502, detail=error)
+
+    db.update_project(project_id, status="printed")
+    return {"ok": True, "project": db.get_project(project_id)}
 
 
 # ---------- フロントエンド ----------

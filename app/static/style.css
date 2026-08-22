@@ -197,6 +197,7 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .btn:hover { filter: brightness(0.95); }
 .btn.secondary { background: #64748b; }
 .btn.success { background: #2563eb; }
+.btn.print { background: #ea580c; font-size: 15px; padding: 13px; }
 .hint { font-size: 11px; color: var(--sub); }
 
 /* ---------- ローディング ---------- */
@@ -222,6 +223,39 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-@media (max-width: 1100px) {
-  #preview-panel { position: fixed; right: 0; top: 0; height: 100vh; box-shadow: -4px 0 16px rgba(0,0,0,.1); z-index: 50; }
+/* ---------- スマホレイアウト ---------- */
+@media (max-width: 900px) {
+  body { height: auto; overflow: auto; }
+  #layout { display: block; height: auto; min-height: 100dvh; }
+
+  #sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  #sidebar h1 { font-size: 16px; }
+  #new-project-btn { padding: 8px; }
+  #project-list { max-height: 132px; }
+  .printer-status { padding-top: 6px; }
+
+  .panel { padding: 14px 12px; }
+  #welcome { min-height: 60dvh; }
+  #welcome h2 { font-size: 21px; }
+  #messages { max-height: 52dvh; padding: 10px 2px; }
+  .msg { max-width: 92%; font-size: 13.5px; }
+
+  #preview-panel {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    box-shadow: none;
+    overflow: visible;
+  }
+  #viewer { height: 250px; }
 }

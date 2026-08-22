@@ -2,8 +2,12 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>AIモデリング工房</title>
+<meta name="theme-color" content="#16a34a">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="/style.css">
 <script type="importmap">
 {
@@ -54,11 +58,12 @@
     <div id="viewer"></div>
     <div id="model-summary"></div>
     <div id="model-actions">
+      <button id="print-btn" class="btn print hidden">🖨 P2Sで印刷開始</button>
       <a id="download-stl" class="btn" download>⬇ STLダウンロード</a>
       <a id="download-scad" class="btn secondary" download>コード(.scad)</a>
       <button id="mark-printed" class="btn success">✅ 印刷済みにする</button>
     </div>
-    <p class="hint">STLをBambu Studioで開き、スライスしてP2Sに送信してください。</p>
+    <p class="hint" id="print-hint">STLをBambu Studioで開き、スライスしてP2Sに送信してください。</p>
   </aside>
 </div>
 
