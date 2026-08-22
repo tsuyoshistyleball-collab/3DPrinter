@@ -1,6 +1,7 @@
 fastapi>=0.111
 uvicorn[standard]>=0.30
 anthropic>=0.40
+claude-agent-sdk>=0.2
 python-dotenv>=1.0
 
 # プリンタ連携（任意）: Bambu Lab P2S を LAN モードで監視・操作する場合に有効化

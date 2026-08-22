@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'planning',
+    claude_session_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -57,6 +58,11 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # v1 で作成された DB への追加カラムのマイグレーション
+        try:
+            conn.execute("ALTER TABLE projects ADD COLUMN claude_session_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # 既に存在する
 
 
 def create_project(title: str) -> dict:
@@ -88,7 +94,13 @@ def get_project(project_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def update_project(project_id: int, *, title: str | None = None, status: str | None = None) -> None:
+def update_project(
+    project_id: int,
+    *,
+    title: str | None = None,
+    status: str | None = None,
+    claude_session_id: str | None = None,
+) -> None:
     if status is not None and status not in STATUSES:
         raise ValueError(f"invalid status: {status}")
     with connect() as conn:
@@ -96,6 +108,11 @@ def update_project(project_id: int, *, title: str | None = None, status: str | N
             conn.execute("UPDATE projects SET title = ?, updated_at = ? WHERE id = ?", (title, _now(), project_id))
         if status is not None:
             conn.execute("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?", (status, _now(), project_id))
+        if claude_session_id is not None:
+            conn.execute(
+                "UPDATE projects SET claude_session_id = ? WHERE id = ?",
+                (claude_session_id, project_id),
+            )
 
 
 def delete_project(project_id: int) -> None:

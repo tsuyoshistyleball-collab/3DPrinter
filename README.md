@@ -18,28 +18,64 @@
 |---|---|---|
 | Python 3.11+ | アプリ本体 | https://www.python.org/ |
 | OpenSCAD | AIが書いたコードを STL に変換 | https://openscad.org/downloads.html |
-| Anthropic API キー | AI（Claude）との対話 | https://console.anthropic.com/ |
+| Claude Code（Pro/Max サブスクで使う場合）| AI（Claude）との対話 | https://claude.com/claude-code |
 | Bambu Studio | STL のスライスと印刷 | https://bambulab.com/ja/download/studio |
 
 ## セットアップ
 
+### 1. 依存パッケージをインストール
+
 ```bash
-# 1. 依存パッケージをインストール
 pip install -r requirements.txt
-
-# 2. 環境変数を設定
-cp .env.example .env
-# .env を編集して ANTHROPIC_API_KEY を設定
-
-# 3. 起動
-uvicorn app.main:app --reload
-
-# 4. ブラウザで開く
-# http://localhost:8000
 ```
 
-> **APIキーなしで試す**: `.env` で `MOCK_AI=1` を設定すると、AI の代わりに
+### 2. AI の認証を設定（どちらか1つ）
+
+**方法A: Claude Pro/Max サブスクリプションで使う【推奨・追加課金なし】**
+
+Claude Agent SDK は Claude Code のログイン情報を使うため、サブスクの利用枠内で
+このアプリを動かせます。
+
+```bash
+# Claude Code をインストール（未導入の場合）
+npm install -g @anthropic-ai/claude-code
+
+# 一度起動して Max プランのアカウントでログイン
+claude   # ブラウザが開くのでログイン → 完了したら終了してよい
+```
+
+これだけです。`.env` の設定は不要です（`ANTHROPIC_API_KEY` を**設定しないこと**。
+設定されていると API 従量課金が優先されます。本アプリはサブスクモード時に
+子プロセスからキーを隠す防御はしていますが、設定しないのが確実です）。
+
+**方法B: Anthropic API キーで使う（従量課金）**
+
+```bash
+cp .env.example .env
+# .env に ANTHROPIC_API_KEY=sk-ant-... を記入
+```
+
+### 3. 起動
+
+```bash
+uvicorn app.main:app --reload
+# → http://localhost:8000 をブラウザで開く
+```
+
+> **AIなしで試す**: `.env` で `MOCK_AI=1` を設定すると、AI の代わりに
 > サンプル応答（壁掛けフック）が返り、モデリング〜プレビューの流れを確認できます。
+
+### サブスク利用時の補足
+
+- 利用量は Claude Code / claude.ai と共通の**プランの利用枠**（5時間ごとのウィンドウと
+  週次上限）から消費されます。上限に達したら時間経過で回復します。
+- 既定は Opus です。上限に当たりやすい場合は `.env` に `CLAUDE_CODE_MODEL=sonnet` を
+  設定すると消費を抑えられます。
+- 会話はプロジェクトごとに Claude Code のセッションとして継続され、2回目以降は
+  差分だけ送信されるため効率的です。
+- サーバーや CI などブラウザログインできない環境で動かす場合は、手元のPCで
+  `claude setup-token` を実行して発行される長期トークンを、その環境の
+  `CLAUDE_CODE_OAUTH_TOKEN` 環境変数に設定してください。
 
 ## 使い方
 
@@ -86,7 +122,10 @@ BAMBU_SERIAL=01S00A000000000 # シリアル番号
 ブラウザで3Dプレビュー → STLダウンロード → Bambu Studio でスライス → P2S で印刷
 ```
 
-- AI モデルは既定で `claude-opus-5`（`.env` の `ANTHROPIC_MODEL` で変更可）。
+- AI バックエンドは2系統: **claude-code**（Claude Agent SDK 経由でサブスクの利用枠を
+  使用、既定）と **api**（`ANTHROPIC_API_KEY` による従量課金）。`.env` の `AI_BACKEND` で
+  明示指定できます。
+- api バックエンドのモデルは既定で `claude-opus-5`（`ANTHROPIC_MODEL` で変更可）。
   安全機構による応答拒否の際は `claude-opus-4-8` に自動フォールバックします。
 - データは `data/` 以下に保存されます（SQLite + 生成ファイル）。Git 管理対象外です。
 - 3D プレビュー用の three.js (MIT ライセンス) は `app/static/vendor/` に同梱しており、

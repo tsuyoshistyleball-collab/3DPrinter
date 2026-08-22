@@ -43,14 +43,18 @@ def _project_or_404(project_id: int) -> dict:
 def _run_ai_turn(project_id: int, user_message: str) -> dict:
     """ユーザー発言を保存し、AI応答（必要ならモデル生成）まで行う。"""
     db.add_message(project_id, "user", user_message)
+    project = db.get_project(project_id)
     history = [
         {"role": m["role"], "content": m["content"]}
         for m in db.list_messages(project_id)
     ]
     try:
-        reply = ai.chat(history)
+        reply = ai.chat(history, claude_session_id=project.get("claude_session_id"))
     except ai.AIError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    if reply.session_id:
+        db.update_project(project_id, claude_session_id=reply.session_id)
 
     new_model = None
     display_text = reply.text

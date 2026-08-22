@@ -1,12 +1,33 @@
-"""Claude との対話（壁打ちインタビュー → OpenSCAD コード生成）。"""
+"""Claude との対話（壁打ちインタビュー → OpenSCAD コード生成）。
+
+バックエンドは3種類:
+- claude-code: Claude Agent SDK 経由。Claude Code にログイン済みの
+  Pro/Max サブスクリプションの利用枠で動く（APIキー不要・追加課金なし）
+- api:         Anthropic API を APIキーで直接呼ぶ（従量課金）
+- mock:        動作確認用のサンプル応答
+
+AI_BACKEND 環境変数で明示指定できる。未指定時は
+MOCK_AI=1 → mock、ANTHROPIC_API_KEY あり → api、それ以外 → claude-code。
+"""
 
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 MODEL_ID = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 FALLBACK_MODEL_ID = "claude-opus-4-8"
-MOCK_AI = os.environ.get("MOCK_AI", "") == "1"
+# Claude Code バックエンドではプランに応じたモデル別名(opus/sonnet/haiku)を使う
+CLAUDE_CODE_MODEL = os.environ.get("CLAUDE_CODE_MODEL", "opus")
+
+
+def backend_name() -> str:
+    if os.environ.get("MOCK_AI") == "1":
+        return "mock"
+    explicit = os.environ.get("AI_BACKEND")
+    if explicit in ("claude-code", "api", "mock"):
+        return explicit
+    return "api" if os.environ.get("ANTHROPIC_API_KEY") else "claude-code"
 
 SYSTEM_PROMPT = """\
 あなたは家庭用3Dプリンター向けのモデリングアシスタントです。ユーザーは Bambu Lab P2S（FDM方式、造形サイズ 256×256×256mm）で日用品（壁掛けフック、卓上スタンド、ケーブルホルダーなど）を作ろうとしています。ユーザーは3Dモデリングの知識がない前提で、専門用語を避けて話してください。
@@ -54,6 +75,8 @@ class AIReply:
     scad_code: str | None
     model_title: str | None
     model_summary: str | None
+    # claude-code バックエンドの会話継続用セッションID（他バックエンドでは None）
+    session_id: str | None = None
 
 
 MOCK_QUESTION = """\
@@ -131,11 +154,119 @@ def _mock_chat(history: list[dict]) -> str:
     return MOCK_QUESTION if user_turns <= 1 else MOCK_MODEL
 
 
-def chat(history: list[dict]) -> AIReply:
-    """会話履歴 [{role, content}, ...] を渡して AI の応答を得る。"""
-    if MOCK_AI:
-        return parse_reply(_mock_chat(history))
+def chat(history: list[dict], claude_session_id: str | None = None) -> AIReply:
+    """会話履歴 [{role, content}, ...] を渡して AI の応答を得る。
 
+    claude_session_id は claude-code バックエンドでの会話継続に使う
+    （プロジェクトごとに保存しておき、次回の呼び出しで渡す）。
+    """
+    backend = backend_name()
+    if backend == "mock":
+        return parse_reply(_mock_chat(history))
+    if backend == "claude-code":
+        return _chat_claude_code(history, claude_session_id)
+    return _chat_api(history)
+
+
+def _render_transcript(history: list[dict]) -> str:
+    """セッション未保存時に会話全体を1つのプロンプトへまとめる。"""
+    if len(history) == 1:
+        return history[0]["content"]
+    lines = ["これまでの会話の記録です。文脈を踏まえて最後のメッセージに応答してください。"]
+    for m in history[:-1]:
+        speaker = "ユーザー" if m["role"] == "user" else "あなた（アシスタント）"
+        lines.append(f"### {speaker}\n{m['content']}")
+    lines.append(f"### ユーザーの新しいメッセージ\n{history[-1]['content']}")
+    return "\n\n".join(lines)
+
+
+def _chat_claude_code(history: list[dict], session_id: str | None) -> AIReply:
+    """Claude Agent SDK（サブスクリプションの利用枠）で応答を得る。"""
+    import asyncio
+
+    try:
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            CLINotFoundError,
+            ProcessError,
+            ClaudeSDKError,
+            ResultMessage,
+            TextBlock,
+            query,
+        )
+    except ImportError:
+        raise AIError(
+            "claude-agent-sdk がインストールされていません。"
+            "`pip install claude-agent-sdk` を実行してください。"
+        )
+
+    # セッションを継続できる場合は最新メッセージだけ、できない場合は全履歴を送る
+    prompt = history[-1]["content"] if session_id else _render_transcript(history)
+
+    workdir = Path(__file__).resolve().parent.parent / "data"
+    workdir.mkdir(parents=True, exist_ok=True)
+    options = ClaudeAgentOptions(
+        system_prompt=SYSTEM_PROMPT,
+        allowed_tools=[],       # 純粋な対話のみ。ツール実行はさせない
+        max_turns=1,
+        model=CLAUDE_CODE_MODEL,
+        resume=session_id,
+        cwd=str(workdir),
+        setting_sources=[],     # ユーザーの CLAUDE.md 等は読み込まない
+    )
+
+    async def run() -> tuple[str, str | None]:
+        texts: list[str] = []
+        new_session_id = None
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        texts.append(block.text)
+            elif isinstance(message, ResultMessage):
+                new_session_id = message.session_id
+                if message.is_error and not texts:
+                    raise AIError(f"Claude Code がエラーを返しました: {message.result or '不明なエラー'}")
+        return "".join(texts), new_session_id
+
+    # ANTHROPIC_API_KEY が見えているとサブスクリプションではなく API 従量課金が
+    # 優先されてしまうため、子プロセスからは隠す。CLAUDE_CODE_SESSION_ID は
+    # Claude Code 内から起動した場合にセッションが親に固定されるのを防ぐ。
+    hidden = {
+        name: os.environ.pop(name)
+        for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_SESSION_ID")
+        if name in os.environ
+    }
+    try:
+        text, new_session_id = asyncio.run(run())
+    except CLINotFoundError:
+        raise AIError(
+            "Claude Code CLI が見つかりません。https://claude.com/claude-code の手順で"
+            "インストールし、`claude` を起動して Max プランのアカウントでログインしてください。"
+        )
+    except ProcessError as e:
+        raise AIError(
+            "Claude Code の実行に失敗しました。ターミナルで `claude` を起動してログイン状態を"
+            f"確認してください。詳細: {e}"
+        )
+    except ClaudeSDKError as e:
+        raise AIError(f"Claude Code との通信でエラーが発生しました: {e}")
+    finally:
+        os.environ.update(hidden)
+
+    if not text.strip():
+        raise AIError(
+            "AIから空の応答が返りました。プランの利用上限に達している可能性があります。"
+            "しばらく待ってから再度お試しください。"
+        )
+    reply = parse_reply(text)
+    reply.session_id = new_session_id
+    return reply
+
+
+def _chat_api(history: list[dict]) -> AIReply:
+    """Anthropic API（APIキー・従量課金）で応答を得る。"""
     import anthropic
 
     client = anthropic.Anthropic()
