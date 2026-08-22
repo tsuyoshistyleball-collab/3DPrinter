@@ -1,0 +1,17 @@
+# AIモデリング工房 systemd サービス（テンプレート）
+# __USER__ と __DIR__ は scripts/install-service.sh が実際の値に置換する
+[Unit]
+Description=AI Modeling Workshop for Bambu Lab P2S
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__PYTHON__ -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
