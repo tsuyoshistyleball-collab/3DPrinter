@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIモデリング工房</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/three.module.js",
+    "three/addons/": "/vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="layout">
+  <aside id="sidebar">
+    <h1>🖨️ AIモデリング工房</h1>
+    <button id="new-project-btn">＋ 新しく作る</button>
+    <ul id="project-list"></ul>
+    <div id="printer-status" class="printer-status" title="プリンタの状態"></div>
+  </aside>
+
+  <main id="main">
+    <div id="welcome" class="panel">
+      <h2>作りたいものは何ですか？</h2>
+      <p>自由に書いてください。AIが質問しながら一緒に形にしていきます。</p>
+      <p class="examples">例: 「玄関に鍵を掛けるフックが欲しい」「スマホを立てる卓上スタンド」「ケーブルをまとめるクリップ」</p>
+      <form id="welcome-form">
+        <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
+        <button type="submit">AIに相談する</button>
+      </form>
+    </div>
+
+    <div id="chat" class="panel hidden">
+      <div id="chat-header">
+        <span id="chat-title"></span>
+        <span id="chat-status" class="status-chip"></span>
+        <button id="delete-project-btn" title="このプロジェクトを削除">🗑</button>
+      </div>
+      <div id="messages"></div>
+      <form id="chat-form">
+        <textarea id="chat-input" rows="2" placeholder="返答や修正依頼を入力…"></textarea>
+        <button type="submit" id="send-btn">送信</button>
+      </form>
+    </div>
+  </main>
+
+  <aside id="preview-panel" class="hidden">
+    <h3>モデルプレビュー</h3>
+    <div id="version-tabs"></div>
+    <div id="viewer"></div>
+    <div id="model-summary"></div>
+    <div id="model-actions">
+      <a id="download-stl" class="btn" download>⬇ STLダウンロード</a>
+      <a id="download-scad" class="btn secondary" download>コード(.scad)</a>
+      <button id="mark-printed" class="btn success">✅ 印刷済みにする</button>
+    </div>
+    <p class="hint">STLをBambu Studioで開き、スライスしてP2Sに送信してください。</p>
+  </aside>
+</div>
+
+<div id="loading-overlay" class="hidden">
+  <div class="spinner"></div>
+  <p id="loading-text">AIが考えています…</p>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
