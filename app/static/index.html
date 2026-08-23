@@ -18,25 +18,63 @@
 }
 </script>
 </head>
-<body>
-<div id="app-version" aria-label="アプリバージョン"></div>
+<body class="home-mode">
+<header id="topbar">
+  <button id="brand-home" class="brand-home" type="button" aria-label="トップページへ戻る">
+    <img class="app-icon" src="/icons/icon-ai-modeling-v3-32.png" alt="">
+    <span>T-Lab</span>
+  </button>
+  <div id="app-version" aria-label="アプリバージョン"></div>
+</header>
 <div id="layout">
   <aside id="sidebar">
-    <h1><img class="app-icon" src="/icons/icon-ai-modeling-v3-32.png" alt="">AIモデリング工房</h1>
-    <button id="new-project-btn">＋ 新しく作る</button>
+    <div class="sidebar-heading">
+      <span>プロジェクト</span>
+      <button id="new-project-btn">＋ 新しく作る</button>
+    </div>
     <ul id="project-list"></ul>
     <div id="printer-status" class="printer-status" title="プリンタの状態"></div>
   </aside>
 
   <main id="main">
-    <div id="welcome" class="panel">
-      <h2>作りたいものは何ですか？</h2>
-      <p>自由に書いてください。AIが質問しながら一緒に形にしていきます。</p>
-      <p class="examples">例: 「玄関に鍵を掛けるフックが欲しい」「スマホを立てる卓上スタンド」「ケーブルをまとめるクリップ」</p>
-      <form id="welcome-form">
-        <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
-        <button type="submit">AIに相談する</button>
-      </form>
+    <div id="welcome">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <span class="hero-kicker">AI × 3D PRINTING</span>
+          <h1 id="hero-title">つくりたい、を<br><em>話す</em>だけ。</h1>
+          <p>AIと相談して、形にして、印刷する。</p>
+        </div>
+      </section>
+
+      <div class="welcome-content">
+        <form id="welcome-form" class="idea-card">
+          <label for="welcome-input"><span class="sparkle">✦</span>今日は何をつくりますか？</label>
+          <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
+          <div class="prompt-chips" aria-label="入力例">
+            <button type="button" data-prompt="玄関に鍵を掛ける壁掛けフック">壁掛けフック</button>
+            <button type="button" data-prompt="スマホを立てる卓上スタンド">スマホスタンド</button>
+            <button type="button" data-prompt="ケーブルをまとめるクリップ">ケーブルクリップ</button>
+          </div>
+          <button class="idea-submit" type="submit"><span>✦</span> AIとつくり始める <span>→</span></button>
+        </form>
+
+        <section class="recent-section" aria-labelledby="recent-title">
+          <div class="section-heading">
+            <h2 id="recent-title"><span>◇</span>最近のプロジェクト</h2>
+            <button id="all-projects-btn" type="button">すべて見る <span>›</span></button>
+          </div>
+          <div id="recent-projects" class="recent-projects"></div>
+        </section>
+
+        <section class="home-printer-card" aria-label="プリンタの状態">
+          <div class="printer-illustration" aria-hidden="true">▣</div>
+          <div class="home-printer-copy">
+            <strong>Bambu Lab P2S</strong>
+            <span id="home-printer-status">状態を確認中…</span>
+          </div>
+          <button id="printer-settings-btn" type="button"><span>⚙</span> 設定 <span>›</span></button>
+        </section>
+      </div>
     </div>
 
     <div id="chat" class="panel hidden">
