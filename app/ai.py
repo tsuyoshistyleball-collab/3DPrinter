@@ -37,7 +37,10 @@ DEFAULTS = {
     "model_mode": os.environ.get("MODEL_MODE", "split"),
     "interview_model": os.environ.get("INTERVIEW_MODEL", "sonnet"),
     "modeling_model": os.environ.get("CLAUDE_CODE_MODEL", "opus"),
+    "web_search": os.environ.get("WEB_SEARCH", "1"),
 }
+# Web検索を使うときはツール実行の往復が要るのでターン数を増やす
+MAX_TURNS_WITH_TOOLS = 8
 
 
 def backend_name() -> str:
@@ -58,10 +61,13 @@ def model_config() -> dict:
     for key in ("interview_model", "modeling_model"):
         if cfg[key] not in MODEL_ALIASES:
             cfg[key] = DEFAULTS[key] if DEFAULTS[key] in MODEL_ALIASES else "opus"
+    cfg["web_search"] = str(cfg["web_search"]) == "1"
     return cfg
 
 
-def save_model_config(model_mode: str, interview_model: str, modeling_model: str) -> None:
+def save_model_config(
+    model_mode: str, interview_model: str, modeling_model: str, web_search: bool
+) -> None:
     if model_mode not in MODEL_MODES:
         raise ValueError(f"不正なモードです: {model_mode}")
     for name in (interview_model, modeling_model):
@@ -72,6 +78,7 @@ def save_model_config(model_mode: str, interview_model: str, modeling_model: str
             "model_mode": model_mode,
             "interview_model": interview_model,
             "modeling_model": modeling_model,
+            "web_search": "1" if web_search else "0",
         }
     )
 
@@ -85,6 +92,39 @@ _INTERVIEW_RULES = """\
 - 質問は一度に2〜4個まで。
 - 聞くべきこと: 寸法、設置方法（壁掛け/置き型、ネジ/テープ）、載せる・掛ける物とその重さ、形の好み。
 - 1〜2往復で十分な情報が揃ったら設計に進む。細部を聞きすぎない。ユーザーが「おまかせ」と言ったら常識的な値で決めて設計に進む。"""
+
+# 寸法の裏取りと、確かさの明示。印刷して初めて合わないと分かる事故を減らすための規則。
+_ACCURACY_RULES = """\
+# 寸法の確かさについて（重要）
+
+3Dプリントは印刷してから寸法違いに気づくと、材料と時間が無駄になります。
+寸法の根拠を偽らず、次のとおり区別して伝えてください。
+
+- **既製品・規格に合わせる依頼**（車種別の車載品、特定機種のスマホケース、家電のカバー、
+  ネジ径、電池サイズ、配管の口径など）では、**必ず WebSearch で実寸を調べてから**答える。
+  検索してもはっきりしなければ「調べたが確かな値が見つからなかった」と正直に言う。
+- 数値を出すときは根拠を必ず添える:
+  - `（調べた値）` … 検索で確認できた寸法。可能なら出典元の名前も添える
+  - `（推定）` … 一般的な相場から見積もった値
+  - `（要実測）` … 現物を測ってもらう必要がある値
+- **推定値を断定的に言わない**。「〜です」ではなく「〜くらいだと思いますが、
+  念のため測っていただけると確実です」のように書く。
+- 既製品にぴったり合わせる依頼では、**実測をお願いすることを優先**する。
+  検索で得た値は個体差・年式差があるため、最後は現物合わせが確実だと伝える。
+- はめ合いがある部分は、実測値でも 0.3mm 程度のすきまを見込む。"""
+
+_IMAGE_RULES = """\
+# 写真が添えられた場合
+
+設置場所や現物の写真が渡されることがあります。写真からは次を読み取ってください。
+
+- 取り付ける場所の形状・素材（壁、木、金属、タイルなど）と、ネジが使えるかテープが要るか
+- 掛ける/載せる物の形と、干渉しそうな周囲の物
+- 写真に写っている既知の大きさの物（コンセント、タイル、硬貨、手など）を手がかりに、
+  おおよその寸法を見積もる
+- **写真から寸法を断定しない**。見積もった値には必ず `（写真からの推定）` を付け、
+  重要な寸法は実測をお願いする。
+- 写真だけでは分からないことは質問する。"""
 
 # 質問はスマホでタップして答えられるよう、必ず機械可読な形式で出させる
 _QUESTION_FORMAT = """\
@@ -143,6 +183,10 @@ SYSTEM_PROMPT = f"""\
 ## 3. 修正対応
 生成後にユーザーから修正依頼が来たら、同じ形式（[MODEL_TITLE] / [MODEL_SUMMARY] / ```scad）で修正版の完全なコードを出力します（差分ではなく全体）。
 
+{_ACCURACY_RULES}
+
+{_IMAGE_RULES}
+
 {_SCAD_RULES}
 
 # その他
@@ -182,6 +226,12 @@ INTERVIEW_SYSTEM_PROMPT = f"""\
 すでにモデルがある状態で修正依頼が来たら、追加の質問はせず（依頼の意味が分からないときだけ質問）、
 すぐに [READY_TO_MODEL] と**変更後の完全な仕様**を [SPEC] に書いて引き継ぎます。
 どこをどう変えるのかも [SPEC] 内に明記してください。
+[SPEC] の各寸法にも `（調べた値）`／`（推定）`／`（要実測）`／`（写真からの推定）` の
+区別をそのまま書き残してください。コード生成担当が根拠の強さを判断できるようにするためです。
+
+{_ACCURACY_RULES}
+
+{_IMAGE_RULES}
 
 # その他
 - 危険物・武器類の依頼は断る（その場合 [READY_TO_MODEL] は出さない）。
@@ -198,6 +248,14 @@ MODELING_SYSTEM_PROMPT = f"""\
 {_OUTPUT_FORMAT}
 
 説明はユーザー（3Dモデリングの知識がない人）向けに、決めた寸法と印刷のコツを簡潔に書きます。
+
+仕様に `（推定）`／`（要実測）`／`（写真からの推定）` と書かれた寸法は確定値ではありません。
+その寸法が合うかどうかで使い物になるかが決まる部分（はめ込み、差し込み、既製品への装着）では:
+- すきまを少し多めに取る、調整しやすい形にするなど、外れにくい設計にする
+- 説明の最後に「**確認してほしい寸法**」として、どこを実測して直せばよいかを1〜2行で書く
+- コード冒頭の変数コメントに `// 要確認` と書き添え、直す場所が分かるようにする
+
+写真が渡された場合は、設置場所の形状や素材を読み取って設計に反映してください。
 
 {_SCAD_RULES}
 """
@@ -348,6 +406,7 @@ def chat(
     claude_session_id: str | None = None,
     previous_scad: str | None = None,
     progress: Progress | None = None,
+    images: list[dict] | None = None,
 ) -> AIReply:
     """会話履歴 [{role, content}, ...] を渡して AI の応答を得る。
 
@@ -362,9 +421,10 @@ def chat(
         progress.stage("modeling")
         return parse_reply(_mock_chat(history))
     cfg = model_config()
+    images = images or []
     if cfg["model_mode"] == "single":
-        return _chat_single(history, claude_session_id, backend, cfg["modeling_model"], progress)
-    return _chat_split(history, claude_session_id, previous_scad, backend, cfg, progress)
+        return _chat_single(history, claude_session_id, backend, cfg, progress, images)
+    return _chat_split(history, claude_session_id, previous_scad, backend, cfg, progress, images)
 
 
 def _render_transcript(history: list[dict]) -> str:
@@ -425,18 +485,30 @@ def _require_text(text: str | None) -> str:
 
 
 def _chat_single(
-    history: list[dict], session_id: str | None, backend: str, model: str, progress: Progress
+    history: list[dict],
+    session_id: str | None,
+    backend: str,
+    cfg: dict,
+    progress: Progress,
+    images: list[dict],
 ) -> AIReply:
     """1つのモデルが質問もコード生成も担当する（従来の動作）。"""
     progress.stage("thinking")
+    model = cfg["modeling_model"]
     usage = None
     if backend == "claude-code":
         prompt = history[-1]["content"] if session_id else _render_transcript(history)
         text, new_session_id, usage = _claude_code_call(
-            SYSTEM_PROMPT, prompt, model, session_id, on_chars=progress.chars
+            SYSTEM_PROMPT,
+            prompt,
+            model,
+            session_id,
+            on_chars=progress.chars,
+            images=images,
+            web_search=cfg["web_search"],
         )
     else:
-        text, usage = _api_call(SYSTEM_PROMPT, history, model)
+        text, usage = _api_call(SYSTEM_PROMPT, history, model, images)
         new_session_id = None
     reply = parse_reply(_require_text(text))
     reply.session_id = new_session_id
@@ -480,6 +552,7 @@ def _chat_split(
     backend: str,
     cfg: dict,
     progress: Progress,
+    images: list[dict],
 ) -> AIReply:
     """質問は安いモデル、OpenSCAD 生成だけ高性能モデルに担当させる。"""
     # --- 1. 聞き取り（安いモデル。プロジェクトの会話セッションを継続する）---
@@ -492,9 +565,13 @@ def _chat_split(
             cfg["interview_model"],
             session_id,
             on_chars=progress.chars,
+            images=images,
+            web_search=cfg["web_search"],
         )
     else:
-        raw, usage = _api_call(INTERVIEW_SYSTEM_PROMPT, history, cfg["interview_model"])
+        raw, usage = _api_call(
+            INTERVIEW_SYSTEM_PROMPT, history, cfg["interview_model"], images
+        )
         new_session_id = None
     raw = _require_text(raw)
 
@@ -523,12 +600,15 @@ def _chat_split(
             cfg["modeling_model"],
             None,
             on_chars=progress.chars,
+            # 設置場所の写真は形状の判断に効くので、モデリング担当にも見せる
+            images=images,
         )
     else:
         raw_model, model_usage = _api_call(
             MODELING_SYSTEM_PROMPT,
             [{"role": "user", "content": modeling_prompt}],
             cfg["modeling_model"],
+            images,
         )
     if model_usage:
         reply.usage.append({**model_usage, "role": "modeling"})
@@ -552,16 +632,45 @@ def _chat_split(
     )
 
 
+def _image_blocks(images: list[dict]) -> list[dict]:
+    """保存済み画像を Anthropic のコンテンツブロックへ変換する。読めない物は飛ばす。"""
+    import base64
+
+    blocks = []
+    for image in images:
+        path = Path(image["path"])
+        if not path.exists():
+            continue
+        data = base64.standard_b64encode(path.read_bytes()).decode()
+        note = (image.get("note") or "").strip()
+        blocks.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.get("media_type") or "image/jpeg",
+                    "data": data,
+                },
+            }
+        )
+        if note:
+            blocks.append({"type": "text", "text": f"（この写真について）{note}"})
+    return blocks
+
+
 def _claude_code_call(
     system_prompt: str,
     prompt: str,
     model: str,
     session_id: str | None,
     on_chars=None,
+    images: list[dict] | None = None,
+    web_search: bool = False,
 ) -> tuple[str, str | None, dict | None]:
-    """Claude Agent SDK（サブスクリプションの利用枠）を1往復だけ呼ぶ。
+    """Claude Agent SDK（サブスクリプションの利用枠）を呼ぶ。
 
     on_chars(累計文字数) は生成中に随時呼ばれる（進捗表示用）。
+    images があるときはコンテンツブロックとして画像を渡す。
     戻り値は (本文, セッションID, トークン使用量)。
     """
     import asyncio
@@ -588,8 +697,10 @@ def _claude_code_call(
     workdir.mkdir(parents=True, exist_ok=True)
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
-        allowed_tools=[],       # 純粋な対話のみ。ツール実行はさせない
-        max_turns=1,
+        # 寸法の裏取り用に WebSearch だけ許可する。ファイル操作等はさせない。
+        allowed_tools=["WebSearch"] if web_search else [],
+        # 検索はツール実行の往復が必要なのでターン数を増やす
+        max_turns=MAX_TURNS_WITH_TOOLS if web_search else 1,
         model=model,
         resume=session_id,
         cwd=str(workdir),
@@ -598,12 +709,25 @@ def _claude_code_call(
         include_partial_messages=on_chars is not None,
     )
 
+    blocks = _image_blocks(images or [])
+
+    async def stream_prompt():
+        """画像を渡すときは、テキストと画像を1つのユーザーメッセージにまとめて送る。"""
+        yield {
+            "type": "user",
+            "message": {"role": "user", "content": [*blocks, {"type": "text", "text": prompt}]},
+            "parent_tool_use_id": None,
+            "session_id": session_id or "default",
+        }
+
     async def run() -> tuple[str, str | None, dict | None]:
         texts: list[str] = []
         new_session_id = None
         usage = None
         streamed = 0
-        async for message in query(prompt=prompt, options=options):
+        # 画像がないときは文字列プロンプト（セッション resume が素直に効く）
+        request = stream_prompt() if blocks else prompt
+        async for message in query(prompt=request, options=options):
             if isinstance(message, StreamEvent):
                 # 生の Anthropic ストリームイベント。text_delta の分だけ数える
                 event = message.event or {}
@@ -650,9 +774,19 @@ def _claude_code_call(
         os.environ.update(hidden)
 
 
-def _api_call(system_prompt: str, messages: list[dict], model: str) -> tuple[str, dict | None]:
+def _api_call(
+    system_prompt: str, messages: list[dict], model: str, images: list[dict] | None = None
+) -> tuple[str, dict | None]:
     """Anthropic API（APIキー・従量課金）を呼ぶ。戻り値は (本文, トークン使用量)。"""
     import anthropic
+
+    # 画像は最後のユーザー発言に添える
+    blocks = _image_blocks(images or [])
+    if blocks and messages:
+        messages = list(messages)
+        last = dict(messages[-1])
+        last["content"] = [*blocks, {"type": "text", "text": last["content"]}]
+        messages[-1] = last
 
     client = anthropic.Anthropic()
     # Opus 5 は安全機構により応答を拒否することが稀にあるため、その場合に

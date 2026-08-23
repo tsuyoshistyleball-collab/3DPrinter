@@ -3,6 +3,7 @@
 起動: uvicorn app.main:app --reload
 """
 
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()  # 他モジュールが環境変数を読む前に .env を反映する
 
-from fastapi import FastAPI, HTTPException
+from uuid import uuid4
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -39,6 +42,21 @@ class SettingsRequest(BaseModel):
     model_mode: str
     interview_model: str
     modeling_model: str
+    web_search: bool = True
+
+
+class NoteRequest(BaseModel):
+    note: str = ""
+
+
+# スマホの写真をそのまま受けても困らない上限。ブラウザ側で縮小してから送る。
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
 
 
 def _project_or_404(project_id: int) -> dict:
@@ -93,6 +111,7 @@ def _run_ai_turn(project_id: int, progress: ai.Progress | None = None) -> dict:
         claude_session_id=project.get("claude_session_id"),
         previous_scad=_latest_scad(project_id),
         progress=progress,
+        images=db.latest_images(project_id),
     )
 
     for entry in reply.usage:
@@ -181,7 +200,8 @@ def api_create_project(req: NewProjectRequest):
         raise HTTPException(status_code=400, detail="作りたいものを入力してください")
     title = message if len(message) <= 30 else message[:30] + "…"
     project = db.create_project(title)
-    db.add_message(project["id"], "user", message)
+    message_id = db.add_message(project["id"], "user", message)
+    db.attach_to_message(project["id"], message_id)
     job = jobs.enqueue(project["id"])
     return {"project": db.get_project(project["id"]), "job": job}
 
@@ -189,17 +209,32 @@ def api_create_project(req: NewProjectRequest):
 @app.get("/api/projects/{project_id}")
 def api_get_project(project_id: int):
     project = _project_or_404(project_id)
+    attachments = db.list_attachments(project_id)
+    by_message: dict[int, list] = {}
+    for a in attachments:
+        if a["message_id"] is not None:
+            by_message.setdefault(a["message_id"], []).append(_public_attachment(a))
+
+    messages = db.list_messages(project_id)
+    for m in messages:
+        m["images"] = by_message.get(m["id"], [])
+
     return {
         "project": project,
-        "messages": db.list_messages(project_id),
+        "messages": messages,
         "models": db.list_model_versions(project_id),
         "job": jobs.status_for(project_id),
+        # まだ送っていない下書きの画像
+        "draft_images": [_public_attachment(a) for a in attachments if a["message_id"] is None],
     }
 
 
 @app.delete("/api/projects/{project_id}")
 def api_delete_project(project_id: int):
     _project_or_404(project_id)
+    # DBの行は外部キーで消えるが、実ファイルは残るので明示的に片付ける
+    for directory in (db.project_upload_dir(project_id), db.project_model_dir(project_id)):
+        shutil.rmtree(directory, ignore_errors=True)
     db.delete_project(project_id)
     return {"ok": True}
 
@@ -211,7 +246,8 @@ def api_send_message(project_id: int, req: MessageRequest):
     message = req.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="メッセージを入力してください")
-    db.add_message(project_id, "user", message)
+    message_id = db.add_message(project_id, "user", message)
+    db.attach_to_message(project_id, message_id)
     return {"job": jobs.enqueue(project_id), "project": db.get_project(project_id)}
 
 
@@ -251,6 +287,65 @@ def api_update_status(project_id: int, req: StatusRequest):
     except ValueError:
         raise HTTPException(status_code=400, detail="不正なステータスです")
     return {"project": db.get_project(project_id)}
+
+
+# ---------- 参考画像 ----------
+
+def _public_attachment(a: dict) -> dict:
+    """フロントへ返す形。サーバー内のファイルパスは出さない。"""
+    return {
+        "id": a["id"],
+        "note": a["note"],
+        "url": f"/api/attachments/{a['id']}",
+        "sent": a["message_id"] is not None,
+    }
+
+
+@app.post("/api/projects/{project_id}/images")
+async def api_upload_image(project_id: int, file: UploadFile = File(...), note: str = Form("")):
+    """写真を1枚受け取って下書きに積む。送信時にメッセージへ紐づく。"""
+    _project_or_404(project_id)
+    suffix = IMAGE_TYPES.get(file.content_type or "")
+    if suffix is None:
+        raise HTTPException(status_code=400, detail="画像ファイル（JPEG/PNG/WebP/GIF）を選んでください")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="画像が空でした")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="画像が大きすぎます（8MBまで）")
+
+    path = db.project_upload_dir(project_id) / f"{uuid4().hex}{suffix}"
+    path.write_bytes(data)
+    attachment = db.add_attachment(
+        project_id, str(path), file.content_type, note.strip() or None
+    )
+    return _public_attachment(attachment)
+
+
+@app.get("/api/attachments/{attachment_id}")
+def api_get_attachment(attachment_id: int):
+    attachment = db.get_attachment(attachment_id)
+    if attachment is None or not Path(attachment["path"]).exists():
+        raise HTTPException(status_code=404, detail="画像が見つかりません")
+    return FileResponse(attachment["path"], media_type=attachment["media_type"])
+
+
+@app.post("/api/attachments/{attachment_id}/note")
+def api_update_attachment_note(attachment_id: int, req: NoteRequest):
+    if db.get_attachment(attachment_id) is None:
+        raise HTTPException(status_code=404, detail="画像が見つかりません")
+    db.update_attachment_note(attachment_id, req.note.strip() or None)
+    return _public_attachment(db.get_attachment(attachment_id))
+
+
+@app.delete("/api/attachments/{attachment_id}")
+def api_delete_attachment(attachment_id: int):
+    attachment = db.get_attachment(attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="画像が見つかりません")
+    Path(attachment["path"]).unlink(missing_ok=True)
+    db.delete_attachment(attachment_id)
+    return {"ok": True}
 
 
 # ---------- モデルファイル ----------
@@ -332,7 +427,9 @@ def api_get_settings():
 @app.post("/api/settings")
 def api_update_settings(req: SettingsRequest):
     try:
-        ai.save_model_config(req.model_mode, req.interview_model, req.modeling_model)
+        ai.save_model_config(
+            req.model_mode, req.interview_model, req.modeling_model, req.web_search
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"settings": ai.model_config()}

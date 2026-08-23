@@ -43,6 +43,7 @@
       <p class="examples">例: 「玄関に鍵を掛けるフックが欲しい」「スマホを立てる卓上スタンド」「ケーブルをまとめるクリップ」</p>
       <form id="welcome-form">
         <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
+        <p class="hint">写真は相談を始めたあとに添えられます（設置場所を撮ると精度が上がります）。</p>
         <button type="submit">AIに相談する</button>
       </form>
     </div>
@@ -64,7 +65,10 @@
         <div id="pending-steps" class="pending-steps"></div>
         <div class="pending-note">待っている間、他の相談を並行して進められます</div>
       </div>
+      <div id="draft-images" class="draft-images hidden"></div>
       <form id="chat-form">
+        <button type="button" id="add-image-btn" class="icon-btn" title="写真を添える">📷</button>
+        <input type="file" id="image-input" accept="image/*" multiple hidden>
         <textarea id="chat-input" rows="2" placeholder="返答や修正依頼を入力…"></textarea>
         <button type="submit" id="send-btn">送信</button>
       </form>
@@ -116,6 +120,17 @@
       <label class="field">
         <span id="modeling-label">モデリングの担当</span>
         <select id="modeling-model"></select>
+      </label>
+    </section>
+
+    <section class="setting-group">
+      <h3>寸法の裏取り</h3>
+      <label class="radio">
+        <input type="checkbox" id="web-search">
+        <span>
+          <b>Web検索を使う</b>
+          <small>車種別の車載品や特定機種のケースなど、既製品に合わせるときに実寸を調べます。切ると AI の記憶だけで答えるため、寸法が不正確になることがあります。</small>
+        </span>
       </label>
     </section>
 

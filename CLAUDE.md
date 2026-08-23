@@ -82,6 +82,25 @@ _run_ai_turn() → ai.chat(履歴) → 応答テキストから ai.parse_reply()
   例外メッセージがそのまま `jobs.error` に入り、フロントがチャットに赤字で出す。
 - サーバー再起動で running のまま残ったジョブは `jobs.start()` がエラーとして片付ける。
 
+### 寸法の裏取り（Web検索）と参考画像
+
+- 設定 `web_search`（既定ON）で `allowed_tools=["WebSearch"]` を渡す。**ツールを許可すると
+  ツール実行の往復が必要なので `max_turns` を 1 → `MAX_TURNS_WITH_TOOLS` に上げている**。
+  ここを1のままにすると検索した瞬間に応答が切れるので注意。
+- 許可するのは WebSearch だけ。ファイル操作系は渡さない。
+- `_ACCURACY_RULES` が「`（調べた値）`／`（推定）`／`（要実測）`／`（写真からの推定）` を
+  必ず付ける」「推定を断定しない」を規定。モデリング担当は推定寸法の箇所に
+  `// 要確認` を書き、説明の最後に「確認してほしい寸法」を出す。
+- 参考画像は `attachments` テーブル。**送信前は `message_id` が NULL の下書き**で、
+  送信時に `db.attach_to_message()` がまとめて紐づける。
+- AIへは `db.latest_images()`（最後に画像が付いたメッセージの画像、最大4枚）を
+  コンテンツブロックで渡す。claude-code バックエンドでは
+  **`query(prompt=...)` に文字列ではなく非同期イテレータを渡す**streaming input モードを使う
+  （`_claude_code_call` の `stream_prompt`）。画像が無いときは文字列のままにしている
+  （セッション resume が素直に効くため）。
+- 画像はブラウザ側で長辺1568pxのJPEGへ縮小してからアップロードする（`shrinkImage`）。
+  サーバーは8MBで拒否。Pillow などの画像ライブラリには依存していない。
+
 ### 進捗表示とトークン計測
 
 `ai.Progress` がワーカーとAI呼び出しの間の通知口。`jobs._DbProgress` が jobs テーブルへ書く。

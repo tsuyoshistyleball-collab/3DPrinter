@@ -9,6 +9,7 @@ from pathlib import Path
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 DB_PATH = DATA_DIR / "app.db"
 MODELS_DIR = DATA_DIR / "models"
+UPLOADS_DIR = DATA_DIR / "uploads"
 
 # プロジェクトの状態遷移: planning(相談中) -> modeled(モデル生成済み) -> printed(印刷済み)
 STATUSES = ("planning", "modeled", "printed")
@@ -28,6 +29,16 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     questions TEXT,
+    created_at TEXT NOT NULL
+);
+-- 参考画像。送信前は message_id が NULL（下書き状態）で、送信時に紐づける。
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    path TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    note TEXT,
     created_at TEXT NOT NULL
 );
 -- AI応答はバックグラウンドで処理する。1プロジェクトにつき同時に1件だけ走らせ、
@@ -110,6 +121,87 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {ddl}")
             except sqlite3.OperationalError:
                 pass  # 既に存在する
+
+
+# ---------- 参考画像 ----------
+
+def project_upload_dir(project_id: int) -> Path:
+    d = UPLOADS_DIR / str(project_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def add_attachment(project_id: int, path: str, media_type: str, note: str | None) -> dict:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO attachments (project_id, path, media_type, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (project_id, path, media_type, note, _now()),
+        )
+        attachment_id = cur.lastrowid
+    return get_attachment(attachment_id)
+
+
+def get_attachment(attachment_id: int) -> dict | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM attachments WHERE id = ?", (attachment_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_attachment_note(attachment_id: int, note: str | None) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE attachments SET note = ? WHERE id = ?", (note, attachment_id))
+
+
+def delete_attachment(attachment_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+
+
+def list_draft_attachments(project_id: int) -> list[dict]:
+    """まだ送信していない（メッセージに紐づいていない）画像。"""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM attachments WHERE project_id = ? AND message_id IS NULL ORDER BY id",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_attachments(project_id: int) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM attachments WHERE project_id = ? ORDER BY id", (project_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def attach_to_message(project_id: int, message_id: int) -> None:
+    """下書き状態の画像をまとめて、いま送ったメッセージに紐づける。"""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE attachments SET message_id = ? WHERE project_id = ? AND message_id IS NULL",
+            (message_id, project_id),
+        )
+
+
+def latest_images(project_id: int, limit: int = 4) -> list[dict]:
+    """最後に画像が添えられたメッセージの画像。AIへ渡す参考資料になる。"""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT message_id FROM attachments WHERE project_id = ? AND message_id IS NOT NULL "
+            "ORDER BY message_id DESC LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if row is None:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM attachments WHERE message_id = ? ORDER BY id LIMIT ?",
+            (row["message_id"], limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---------- ジョブ（AI応答のバックグラウンド処理） ----------
@@ -351,14 +443,16 @@ def delete_project(project_id: int) -> None:
 
 def add_message(
     project_id: int, role: str, content: str, questions: list[dict] | None = None
-) -> None:
+) -> int:
     with connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO messages (project_id, role, content, questions, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (project_id, role, content, json.dumps(questions, ensure_ascii=False) if questions else None, _now()),
         )
+        message_id = cur.lastrowid
         conn.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (_now(), project_id))
+    return message_id
 
 
 def list_messages(project_id: int) -> list[dict]:

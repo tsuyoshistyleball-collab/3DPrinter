@@ -42,6 +42,7 @@ const state = {
   backend: null,
   modelOptions: ['haiku', 'sonnet', 'opus'],
   activeJobs: [],
+  draftImages: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -110,6 +111,8 @@ async function openProject(id) {
   showChat(data.project);
   renderMessages(data.messages);
   setModels(data.models);
+  state.draftImages = data.draft_images ?? [];
+  renderDraftImages();
   updateChatPending();
   refreshProjects();
 }
@@ -155,6 +158,7 @@ function renderMessages(messages) {
   box.innerHTML = '';
   messages.forEach((m, i) => {
     if (m.content) appendMessage(m.role, m.content);
+    if (m.images?.length) box.appendChild(renderSentImages(m.images));
     if (m.role !== 'assistant' || !m.questions?.length) return;
     // 最新の質問だけタップして答えられるようにし、過去の質問は読み物として残す
     const isLatest = i === messages.length - 1;
@@ -171,6 +175,123 @@ function appendMessage(role, content) {
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
 }
+
+// ---------- 参考画像 ----------
+
+// Claudeが扱いやすい大きさに落としてから送る。スマホの写真をそのまま上げると
+// 回線もトークンも無駄になるため、長辺1568pxのJPEGに変換する。
+const MAX_IMAGE_EDGE = 1568;
+
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('画像を変換できませんでした'))), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('画像を読み込めませんでした'));
+    };
+    img.src = url;
+  });
+}
+
+async function uploadImages(files) {
+  if (state.currentId === null) return;
+  for (const file of files) {
+    try {
+      const blob = await shrinkImage(file);
+      const form = new FormData();
+      form.append('file', blob, 'photo.jpg');
+      const res = await fetch(`/api/projects/${state.currentId}/images`, { method: 'POST', body: form });
+      if (!res.ok) throw new Error((await res.json()).detail ?? 'アップロードに失敗しました');
+      state.draftImages.push(await res.json());
+      renderDraftImages();
+    } catch (e) {
+      alert(`写真を追加できませんでした:\n${e.message}`);
+    }
+  }
+}
+
+function renderDraftImages() {
+  const box = $('draft-images');
+  box.innerHTML = '';
+  box.classList.toggle('hidden', state.draftImages.length === 0);
+  for (const image of state.draftImages) {
+    const card = document.createElement('div');
+    card.className = 'draft-image';
+
+    const thumb = document.createElement('img');
+    thumb.src = image.url;
+    thumb.alt = '';
+    card.appendChild(thumb);
+
+    const note = document.createElement('input');
+    note.type = 'text';
+    note.className = 'draft-note';
+    note.placeholder = 'この写真の説明（例: ここに掛けたい）';
+    note.value = image.note ?? '';
+    // 説明はその場でサーバーへ保存する（送信ボタンを押す前に消えないように）
+    note.onchange = () => {
+      image.note = note.value;
+      api(`/api/attachments/${image.id}/note`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note.value }),
+      }).catch(() => {});
+    };
+    card.appendChild(note);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'draft-remove';
+    remove.textContent = '✕';
+    remove.title = 'この写真を外す';
+    remove.onclick = async () => {
+      try {
+        await api(`/api/attachments/${image.id}`, { method: 'DELETE' });
+      } catch { /* 既に消えていても気にしない */ }
+      state.draftImages = state.draftImages.filter((i) => i.id !== image.id);
+      renderDraftImages();
+    };
+    card.appendChild(remove);
+
+    box.appendChild(card);
+  }
+}
+
+function renderSentImages(images) {
+  const row = document.createElement('div');
+  row.className = 'sent-images';
+  for (const image of images) {
+    const figure = document.createElement('figure');
+    const img = document.createElement('img');
+    img.src = image.url;
+    img.alt = image.note ?? '';
+    img.onclick = () => window.open(image.url, '_blank');
+    figure.appendChild(img);
+    if (image.note) {
+      const caption = document.createElement('figcaption');
+      caption.textContent = image.note;
+      figure.appendChild(caption);
+    }
+    row.appendChild(figure);
+  }
+  return row;
+}
+
+$('add-image-btn').onclick = () => $('image-input').click();
+$('image-input').onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';   // 同じ写真をもう一度選べるようにする
+  await uploadImages(files);
+};
 
 // ---------- 質問への回答フォーム ----------
 
@@ -292,10 +413,15 @@ $('welcome-form').onsubmit = async (e) => {
 };
 
 async function sendChat(message) {
-  if (!message || state.currentId === null) return;
+  // 写真だけを送りたい場合もあるので、下書き画像があればメッセージ空でも通す
+  if (state.currentId === null) return;
+  if (!message && !state.draftImages.length) return;
   const projectId = state.currentId;
+  if (!message) message = '写真を送ります。参考にしてください。';
   appendMessage('user', message);
   $('chat-input').value = '';
+  state.draftImages = [];
+  renderDraftImages();
   try {
     const data = await api(`/api/projects/${projectId}/messages`, {
       method: 'POST',
@@ -589,6 +715,7 @@ function openSettings() {
   }
   fillModelSelect($('interview-model'), s.interview_model);
   fillModelSelect($('modeling-model'), s.modeling_model);
+  $('web-search').checked = s.web_search !== false;
   updateSettingsMode();
   $('settings-note').textContent = BACKEND_NOTES[state.backend] ?? '';
   $('settings-modal').classList.remove('hidden');
@@ -612,6 +739,7 @@ $('settings-save').onclick = async () => {
         model_mode: selectedMode(),
         interview_model: $('interview-model').value,
         modeling_model: $('modeling-model').value,
+        web_search: $('web-search').checked,
       }),
     });
     state.settings = data.settings;
