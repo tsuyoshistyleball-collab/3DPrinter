@@ -162,10 +162,13 @@ function renderRecentProjects() {
 }
 
 async function openProject(id) {
+  // 別のプロジェクトを開いたときは会話の先頭から、同じプロジェクトの読み直し
+  // （AIの応答が届いた）ときは新しい応答の頭に位置を合わせる
+  const switched = state.currentId !== id;
   state.currentId = id;
   const data = await api(`/api/projects/${id}`);
   showChat(data.project);
-  renderMessages(data.messages);
+  renderMessages(data.messages, switched ? 'top' : 'latest');
   setModels(data.models);
   state.draftImages = data.draft_images ?? [];
   renderDraftImages();
@@ -211,27 +214,40 @@ function renderRich(el, text) {
   });
 }
 
-function renderMessages(messages) {
+// scrollTo: 'top' = 会話の先頭から読ませる / 'latest' = 最後のAI応答の頭に合わせる
+function renderMessages(messages, scrollTo = 'top') {
   const box = $('messages');
   box.innerHTML = '';
+  let lastReply = null;
   messages.forEach((m, i) => {
-    if (m.content) appendMessage(m.role, m.content);
+    if (m.content) {
+      const el = appendMessage(m.role, m.content);
+      if (m.role === 'assistant') lastReply = el;
+    }
     if (m.images?.length) box.appendChild(renderSentImages(m.images));
     if (m.role !== 'assistant' || !m.questions?.length) return;
     // 最新の質問だけタップして答えられるようにし、過去の質問は読み物として残す
     const isLatest = i === messages.length - 1;
     box.appendChild(isLatest ? buildQuestionForm(m.questions) : buildAnsweredQuestions(m.questions));
   });
-  box.scrollTop = box.scrollHeight;
+
+  if (scrollTo === 'latest' && lastReply) {
+    // 新しい応答は「途中から」ではなく頭から読めるよう、その位置に合わせる
+    box.scrollTop = lastReply.offsetTop - box.offsetTop;
+  } else {
+    box.scrollTop = 0;
+  }
 }
 
-function appendMessage(role, content) {
+function appendMessage(role, content, { scroll = false } = {}) {
   const box = $('messages');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   renderRich(div, content);
   box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
+  // 一覧の描画中は最後にまとめて位置を決めるので、ここでは動かさない
+  if (scroll) box.scrollTop = box.scrollHeight;
+  return div;
 }
 
 // ---------- 参考画像 ----------
@@ -476,7 +492,7 @@ async function sendChat(message) {
   if (!message && !state.draftImages.length) return;
   const projectId = state.currentId;
   if (!message) message = '写真を送ります。参考にしてください。';
-  appendMessage('user', message);
+  appendMessage('user', message, { scroll: true });   // 送った発言は見えるところへ
   $('chat-input').value = '';
   state.draftImages = [];
   renderDraftImages();
@@ -489,7 +505,7 @@ async function sendChat(message) {
     if (state.currentId === projectId) updateChatPending();
     renderProjectList();
   } catch (e) {
-    appendMessage('error', e.message);
+    appendMessage('error', e.message, { scroll: true });
   }
 }
 
@@ -952,7 +968,7 @@ async function refreshJobs() {
     try {
       const result = await api(`/api/jobs/${job.id}`);
       if (result.status === 'error' && job.project_id === state.currentId) {
-        appendMessage('error', result.error ?? 'AIの処理に失敗しました。');
+        appendMessage('error', result.error ?? 'AIの処理に失敗しました。', { scroll: true });
       }
     } catch { /* ジョブが消えていても致命的ではない */ }
   }

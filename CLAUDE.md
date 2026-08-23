@@ -20,8 +20,13 @@ Tailscale内で運用する）。UI・エラーメッセージ・コミットメ
 
 互いの変更を潰さないための手順:
 
-1. **作業前に必ず取り込む**: `git fetch chatgpt && git log --oneline HEAD..chatgpt/<branch>`
-   で相手の新しいコミットを確認し、あれば `git cherry-pick` か `git merge` してから始める。
+1. **作業前に必ず取り込む**: 相手の新しいコミットを確認し、あれば `git cherry-pick` してから始める。
+   cherry-pick するとコミットIDが変わるため、素の `HEAD..chatgpt/<branch>` は取り込み済みの
+   ものまで「未取り込み」に見える。**内容で比較する次の形を使うこと**:
+
+   ```bash
+   git fetch chatgpt && git log --oneline --cherry-pick --right-only HEAD...chatgpt/<branch>
+   ```
 2. **作業後は必ずコミットする**。未コミットのまま放置すると、相手が pull したときに消える。
 3. **同じファイルを長時間開きっぱなしにしない**。特に `app/static/index.html` と
    `style.css` は両者が触りやすく、実際に競合した実績がある。
