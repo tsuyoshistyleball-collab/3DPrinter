@@ -59,11 +59,15 @@ if (-not $openscad) {
 $ok += "OpenSCAD: $openscad"
 
 # --- 5. auto-start task (runs scripts\start-app-windows.ps1 at logon) -------
+# Two triggers: at logon, plus every 15 min as a self-heal. MultipleInstances=IgnoreNew
+# makes the repeating trigger a no-op while the app is alive, and a restart after a crash
+# (e.g. the OOM killer on a memory-tight machine).
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$root\scripts\start-app-windows.ps1`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
-Register-ScheduledTask -TaskName 'AIModelingKobo' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-$ok += 'Scheduled task "AIModelingKobo" registered (starts at logon)'
+$atLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$selfHeal = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName 'AIModelingKobo' -Action $action -Trigger @($atLogon, $selfHeal) -Settings $settings -Force | Out-Null
+$ok += 'Scheduled task "AIModelingKobo" registered (logon + 15-min self-heal)'
 
 # --- 6. phone access via Tailscale (tailnet-only HTTPS) ---------------------
 $appUrl = 'http://127.0.0.1:8000'

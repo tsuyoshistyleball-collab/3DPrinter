@@ -128,7 +128,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1
 - Python仮想環境(`.venv`)と依存パッケージの導入
 - `.env` の作成
 - OpenSCAD のポータブル版を導入（管理者権限不要。`winget` 版は昇格を求められて止まることがあるため）
-- タスクスケジューラに `AIModelingKobo` を登録（**ログオン時に自動起動**）
+- タスクスケジューラに `AIModelingKobo` を登録（**ログオン時に自動起動** + 15分ごとの自己修復。
+  落ちていたら復帰し、動いていれば何もしません）
 - Tailscale serve を設定（**tailnet内限定のHTTPS**。LAN・インターネットには公開しない）
 - アプリを起動して疎通確認
 
