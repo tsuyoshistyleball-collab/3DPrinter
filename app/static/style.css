@@ -73,12 +73,102 @@ body {
 .status-modeled  { background: #dbeafe; color: #1e40af; }
 .status-printed  { background: #dcfce7; color: #166534; }
 
+.settings-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--sub);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-btn:hover { background: #f3f4f6; color: var(--text); }
+
 .printer-status {
   font-size: 11px;
   color: var(--sub);
   border-top: 1px solid var(--border);
   padding-top: 8px;
 }
+
+/* 画面右上のバージョン表示。どの版が動いているかを取り違えないための目印 */
+.version-badge {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 150;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--sub);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.version-badge.dirty { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+.version-badge:empty { display: none; }
+
+/* ---------- 設定ダイアログ ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  z-index: 200;
+}
+.modal-box {
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 20px;
+  width: min(460px, 100%);
+  max-height: 90dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.modal-box h2 { font-size: 17px; }
+.setting-group { display: flex; flex-direction: column; gap: 10px; }
+.setting-group h3 { font-size: 13px; color: var(--sub); font-weight: 600; }
+
+.radio {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.radio:has(input:checked) { border-color: var(--accent); background: #f0fdf4; }
+.radio input { margin-top: 3px; accent-color: var(--accent); }
+.radio b { font-size: 14px; font-weight: 600; }
+.radio small { display: block; margin-top: 3px; font-size: 11.5px; color: var(--sub); line-height: 1.6; }
+
+.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.field select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.modal-actions .btn { display: inline-block; min-width: 96px; padding: 10px 16px; }
 
 /* ---------- メイン ---------- */
 #main {
@@ -145,6 +235,57 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
 #chat-form { display: flex; gap: 10px; padding-top: 12px; align-items: flex-end; }
 #chat-form textarea { flex: 1; }
+
+/* ---------- 質問への回答フォーム ---------- */
+.q-form {
+  align-self: flex-start;
+  width: min(560px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.q-item { display: flex; flex-direction: column; gap: 8px; }
+.q-text { font-size: 13.5px; line-height: 1.6; }
+.q-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.chip:hover { background: #f3f4f6; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.q-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 13.5px;
+  font-family: inherit;
+  background: var(--panel);
+  color: var(--text);
+}
+.q-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.q-send { padding: 12px; font-size: 14px; }
+.q-hint { margin-top: -6px; }
+
+.q-answered {
+  align-self: flex-start;
+  max-width: 78%;
+  font-size: 12px;
+  color: var(--sub);
+  line-height: 1.8;
+  padding: 0 4px;
+}
 
 /* ---------- プレビュー ---------- */
 #preview-panel {

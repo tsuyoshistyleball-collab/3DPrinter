@@ -14,9 +14,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import ai, db, modeling, printer, slicer
+from app import ai, db, modeling, printer, slicer, version
 
-app = FastAPI(title="AI Auto Modeling for Bambu Lab P2S")
+app = FastAPI(title="T-Lab")
 
 db.init_db()
 
@@ -33,6 +33,12 @@ class StatusRequest(BaseModel):
     status: str
 
 
+class SettingsRequest(BaseModel):
+    model_mode: str
+    interview_model: str
+    modeling_model: str
+
+
 def _project_or_404(project_id: int) -> dict:
     project = db.get_project(project_id)
     if project is None:
@@ -40,16 +46,44 @@ def _project_or_404(project_id: int) -> dict:
     return project
 
 
+def _history_text(message: dict) -> str:
+    """AIへ渡す履歴用のテキスト。
+
+    質問はタップUI用に構造化して別カラムへ退避してあるため、表示用テキストには
+    残っていない。セッションが切れて履歴を畳み直すときに文脈が欠けないよう、
+    ここで質問文を復元して付け直す。
+    """
+    content = message["content"]
+    questions = message.get("questions")
+    if not questions:
+        return content
+    asked = "\n".join(f"- {q['text']}" for q in questions if q.get("text"))
+    return f"{content}\n{asked}".strip()
+
+
+def _latest_scad(project_id: int) -> str | None:
+    """最新バージョンのSCADコード。会話を見ていないモデリング担当へ渡す用。"""
+    versions = db.list_model_versions(project_id)
+    if not versions:
+        return None
+    path = Path(versions[-1]["scad_path"])
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
 def _run_ai_turn(project_id: int, user_message: str) -> dict:
     """ユーザー発言を保存し、AI応答（必要ならモデル生成）まで行う。"""
     db.add_message(project_id, "user", user_message)
     project = db.get_project(project_id)
     history = [
-        {"role": m["role"], "content": m["content"]}
+        {"role": m["role"], "content": _history_text(m)}
         for m in db.list_messages(project_id)
     ]
     try:
-        reply = ai.chat(history, claude_session_id=project.get("claude_session_id"))
+        reply = ai.chat(
+            history,
+            claude_session_id=project.get("claude_session_id"),
+            previous_scad=_latest_scad(project_id),
+        )
     except ai.AIError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -72,10 +106,11 @@ def _run_ai_turn(project_id: int, user_message: str) -> dict:
     # 表示用テキスト（コード除去済み）を履歴として保存する。コード本体は
     # model_versions に保存されるため会話コンテキストからは失われるが、
     # 修正依頼時はAIが最新仕様を要約から再構成できる。
-    db.add_message(project_id, "assistant", display_text)
+    db.add_message(project_id, "assistant", display_text, questions=reply.questions)
 
     return {
         "reply": display_text,
+        "questions": reply.questions,
         "model": new_model,
         "project": db.get_project(project_id),
     }
@@ -219,6 +254,31 @@ def api_print_model(project_id: int, version: int):
 
     db.update_project(project_id, status="printed")
     return {"ok": True, "project": db.get_project(project_id)}
+
+
+@app.get("/api/version")
+def api_version():
+    return version.info()
+
+
+# ---------- 設定 ----------
+
+@app.get("/api/settings")
+def api_get_settings():
+    return {
+        "settings": ai.model_config(),
+        "backend": ai.backend_name(),
+        "model_options": list(ai.MODEL_ALIASES),
+    }
+
+
+@app.post("/api/settings")
+def api_update_settings(req: SettingsRequest):
+    try:
+        ai.save_model_config(req.model_mode, req.interview_model, req.modeling_model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"settings": ai.model_config()}
 
 
 # ---------- フロントエンド ----------

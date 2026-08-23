@@ -1,5 +1,6 @@
 """SQLite によるプロジェクト（作りたいもの）とモデルバージョンの管理。"""
 
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -26,7 +27,12 @@ CREATE TABLE IF NOT EXISTS messages (
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
+    questions TEXT,
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS model_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +69,26 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN claude_session_id TEXT")
         except sqlite3.OperationalError:
             pass  # 既に存在する
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN questions TEXT")
+        except sqlite3.OperationalError:
+            pass  # 既に存在する
+
+
+def get_settings() -> dict:
+    with connect() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
+def set_settings(values: dict) -> None:
+    with connect() as conn:
+        for key, value in values.items():
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
 
 
 def create_project(title: str) -> dict:
@@ -120,11 +146,14 @@ def delete_project(project_id: int) -> None:
         conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
 
-def add_message(project_id: int, role: str, content: str) -> None:
+def add_message(
+    project_id: int, role: str, content: str, questions: list[dict] | None = None
+) -> None:
     with connect() as conn:
         conn.execute(
-            "INSERT INTO messages (project_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (project_id, role, content, _now()),
+            "INSERT INTO messages (project_id, role, content, questions, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (project_id, role, content, json.dumps(questions, ensure_ascii=False) if questions else None, _now()),
         )
         conn.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (_now(), project_id))
 
@@ -134,7 +163,15 @@ def list_messages(project_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM messages WHERE project_id = ? ORDER BY id", (project_id,)
         ).fetchall()
-        return [dict(r) for r in rows]
+    messages = []
+    for r in rows:
+        m = dict(r)
+        try:
+            m["questions"] = json.loads(m["questions"]) if m.get("questions") else None
+        except (TypeError, ValueError):
+            m["questions"] = None
+        messages.append(m)
+    return messages
 
 
 def project_model_dir(project_id: int) -> Path:

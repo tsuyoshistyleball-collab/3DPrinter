@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 OK="✅"; NG="❌"; WARN="⚠️ "
 MISSING=0
 
-echo "=== AIモデリング工房 セットアップ ==="
+echo "=== T-Lab セットアップ ==="
 echo
 
 # --- Python ---

@@ -1,6 +1,6 @@
 {
-  "name": "AIモデリング工房",
-  "short_name": "モデリング工房",
+  "name": "T-Lab",
+  "short_name": "T-Lab",
   "description": "AIと相談しながら3Dプリント用モデルを作成し、Bambu Lab P2Sで印刷するアプリ",
   "start_url": "/",
   "display": "standalone",

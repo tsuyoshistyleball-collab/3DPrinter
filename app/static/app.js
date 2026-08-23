@@ -20,12 +20,27 @@ const STATUS_LABELS = {
   printed: '印刷済み',
 };
 
+const MODEL_LABELS = {
+  haiku: 'Haiku（最軽量・最速）',
+  sonnet: 'Sonnet（軽量・バランス型）',
+  opus: 'Opus（最高性能）',
+};
+
+const BACKEND_NOTES = {
+  'claude-code': 'Claudeサブスクリプションの利用枠で動作中です（追加課金なし）。',
+  api: 'APIキーによる従量課金で動作中です。',
+  mock: 'モック（AIなし）モードで動作中のため、この設定は使われません。',
+};
+
 const state = {
   projects: [],
   currentId: null,
   models: [],
   currentVersion: null,
   canPrint: false,
+  settings: null,
+  backend: null,
+  modelOptions: ['haiku', 'sonnet', 'opus'],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -99,10 +114,32 @@ function showChat(project) {
 
 // ---------- チャット ----------
 
+// **強調** だけ太字にする。HTMLは解釈せずテキストとして扱う。
+function renderRich(el, text) {
+  el.textContent = '';
+  const parts = String(text).split(/\*\*([\s\S]+?)\*\*/g);
+  parts.forEach((part, i) => {
+    if (!part) return;
+    if (i % 2 === 1) {
+      const strong = document.createElement('strong');
+      strong.textContent = part;
+      el.appendChild(strong);
+    } else {
+      el.appendChild(document.createTextNode(part));
+    }
+  });
+}
+
 function renderMessages(messages) {
   const box = $('messages');
   box.innerHTML = '';
-  for (const m of messages) appendMessage(m.role, m.content);
+  messages.forEach((m, i) => {
+    if (m.content) appendMessage(m.role, m.content);
+    if (m.role !== 'assistant' || !m.questions?.length) return;
+    // 最新の質問だけタップして答えられるようにし、過去の質問は読み物として残す
+    const isLatest = i === messages.length - 1;
+    box.appendChild(isLatest ? buildQuestionForm(m.questions) : buildAnsweredQuestions(m.questions));
+  });
   box.scrollTop = box.scrollHeight;
 }
 
@@ -110,9 +147,105 @@ function appendMessage(role, content) {
   const box = $('messages');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  div.textContent = content;
+  renderRich(div, content);
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
+}
+
+// ---------- 質問への回答フォーム ----------
+
+function buildQuestionForm(questions) {
+  const card = document.createElement('div');
+  card.className = 'q-form';
+  const fields = [];
+
+  questions.forEach((q, i) => {
+    const item = document.createElement('div');
+    item.className = 'q-item';
+
+    const label = document.createElement('div');
+    label.className = 'q-text';
+    renderRich(label, `${i + 1}. ${q.text}`);
+    item.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'q-input';
+    input.placeholder = '選択肢をタップ、または自由に入力';
+
+    const chips = document.createElement('div');
+    chips.className = 'q-choices';
+    for (const choice of q.choices ?? []) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.textContent = choice;
+      // 選択済みのものをもう一度押したら解除する
+      chip.onclick = () => {
+        const wasActive = chip.classList.contains('active');
+        input.value = wasActive ? '' : choice;
+        syncChips();
+      };
+      chips.appendChild(chip);
+    }
+    if (chips.children.length) item.appendChild(chips);
+
+    // 手入力すると、一致しなくなった選択肢のハイライトを外す
+    const syncChips = () => {
+      for (const chip of chips.children) {
+        chip.classList.toggle('active', chip.textContent === input.value);
+      }
+    };
+    input.oninput = syncChips;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        submitAnswers(fields);
+      }
+    });
+
+    item.appendChild(input);
+    card.appendChild(item);
+    fields.push({ question: q, input });
+  });
+
+  const send = document.createElement('button');
+  send.type = 'button';
+  send.className = 'btn q-send';
+  send.textContent = 'この内容で回答する';
+  send.onclick = () => submitAnswers(fields);
+  card.appendChild(send);
+
+  const hint = document.createElement('p');
+  hint.className = 'hint q-hint';
+  hint.textContent = '答えられる項目だけでかまいません。下の入力欄に自由に書いて送ることもできます。';
+  card.appendChild(hint);
+
+  return card;
+}
+
+function buildAnsweredQuestions(questions) {
+  const box = document.createElement('div');
+  box.className = 'q-answered';
+  questions.forEach((q, i) => {
+    const line = document.createElement('div');
+    line.textContent = `${i + 1}. ${q.text}`;
+    box.appendChild(line);
+  });
+  return box;
+}
+
+function submitAnswers(fields) {
+  const lines = fields
+    .filter(({ input }) => input.value.trim())
+    .map(({ question, input }) => `- ${question.text} → ${input.value.trim()}`);
+  const extra = $('chat-input').value.trim();
+  if (!lines.length && !extra) {
+    alert('1つ以上の項目を選ぶか入力してください。');
+    return;
+  }
+  if (extra) lines.push(extra);
+  sendChat(lines.join('\n'));
 }
 
 function setLoading(on, text = 'AIが考えています…（1分ほどかかることがあります）') {
@@ -143,13 +276,10 @@ $('welcome-form').onsubmit = async (e) => {
   if (data) await openProject(data.project.id);
 };
 
-$('chat-form').onsubmit = async (e) => {
-  e.preventDefault();
-  const input = $('chat-input');
-  const message = input.value.trim();
+async function sendChat(message) {
   if (!message || state.currentId === null) return;
   appendMessage('user', message);
-  input.value = '';
+  $('chat-input').value = '';
   const data = await handleAITurn(
     api(`/api/projects/${state.currentId}/messages`, {
       method: 'POST',
@@ -157,6 +287,11 @@ $('chat-form').onsubmit = async (e) => {
     })
   );
   if (data) await openProject(state.currentId);
+}
+
+$('chat-form').onsubmit = (e) => {
+  e.preventDefault();
+  sendChat($('chat-input').value.trim());
 };
 
 // Enterで送信（Shift+Enterで改行）
@@ -334,6 +469,109 @@ async function loadSTL(url) {
   controls.target.set(0, size.z / 2, 0);
 }
 
+// ---------- 設定 ----------
+
+async function refreshSettings() {
+  try {
+    const data = await api('/api/settings');
+    state.settings = data.settings;
+    state.backend = data.backend;
+    state.modelOptions = data.model_options ?? state.modelOptions;
+  } catch { /* 設定は補助情報のため失敗しても無視 */ }
+  renderConfigLabel();
+}
+
+function renderConfigLabel() {
+  const s = state.settings;
+  $('ai-config').textContent = !s
+    ? '設定'
+    : s.model_mode === 'split'
+      ? `質問 ${s.interview_model} / 造形 ${s.modeling_model}`
+      : `モデル ${s.modeling_model}`;
+}
+
+function fillModelSelect(select, selected) {
+  select.innerHTML = '';
+  for (const name of state.modelOptions) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = MODEL_LABELS[name] ?? name;
+    opt.selected = name === selected;
+    select.appendChild(opt);
+  }
+}
+
+function selectedMode() {
+  return document.querySelector('input[name="model-mode"]:checked')?.value ?? 'split';
+}
+
+// singleモードでは「モデリング担当」を唯一のモデルとして扱う
+function updateSettingsMode() {
+  const split = selectedMode() === 'split';
+  $('interview-field').classList.toggle('hidden', !split);
+  $('modeling-label').textContent = split ? 'モデリングの担当' : '使用するモデル';
+}
+
+function openSettings() {
+  const s = state.settings ?? { model_mode: 'split', interview_model: 'sonnet', modeling_model: 'opus' };
+  for (const radio of document.querySelectorAll('input[name="model-mode"]')) {
+    radio.checked = radio.value === s.model_mode;
+  }
+  fillModelSelect($('interview-model'), s.interview_model);
+  fillModelSelect($('modeling-model'), s.modeling_model);
+  updateSettingsMode();
+  $('settings-note').textContent = BACKEND_NOTES[state.backend] ?? '';
+  $('settings-modal').classList.remove('hidden');
+}
+
+$('settings-btn').onclick = openSettings;
+$('settings-cancel').onclick = () => $('settings-modal').classList.add('hidden');
+$('settings-modal').onclick = (e) => {
+  if (e.target === $('settings-modal')) $('settings-modal').classList.add('hidden');
+};
+for (const radio of document.querySelectorAll('input[name="model-mode"]')) {
+  radio.onchange = updateSettingsMode;
+}
+
+$('settings-save').onclick = async () => {
+  try {
+    const data = await api('/api/settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        model_mode: selectedMode(),
+        interview_model: $('interview-model').value,
+        modeling_model: $('modeling-model').value,
+      }),
+    });
+    state.settings = data.settings;
+    renderConfigLabel();
+    $('settings-modal').classList.add('hidden');
+  } catch (e) {
+    alert(`設定を保存できませんでした:\n${e.message}`);
+  }
+};
+
+// ---------- バージョン表示 ----------
+
+async function refreshVersion() {
+  const el = $('version-badge');
+  try {
+    const v = await api('/api/version');
+    const commit = v.commit ? ` · ${v.commit}` : '';
+    // 未コミットの変更が乗っているときは * を付けて色を変える
+    el.textContent = `v${v.version}${commit}${v.dirty ? '*' : ''}`;
+    el.classList.toggle('dirty', !!v.dirty);
+    el.title = [
+      `バージョン ${v.version}`,
+      v.branch ? `ブランチ ${v.branch}` : null,
+      v.commit ? `コミット ${v.commit}` : null,
+      v.dirty ? `未コミットの変更 ${v.changed_files} ファイル` : 'コミット済みのコードで稼働中',
+    ].filter(Boolean).join('\n');
+  } catch {
+    el.textContent = '';
+  }
+}
+
 // ---------- プリンタ状態 ----------
 
 async function refreshPrinterStatus() {
@@ -363,5 +601,7 @@ if ('serviceWorker' in navigator) {
 }
 
 refreshProjects();
+refreshSettings();
+refreshVersion();
 refreshPrinterStatus();
 setInterval(refreshPrinterStatus, 30000);

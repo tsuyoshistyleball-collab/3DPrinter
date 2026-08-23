@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-「AIモデリング工房」— Bambu Lab P2S 向けのAI自動モデリングWebアプリ。ユーザーが日本語で
+「T-Lab」— Bambu Lab P2S 向けのAI自動モデリングWebアプリ。ユーザーが日本語で
 「作りたいもの」を伝えると、AIが壁打ち形式で仕様を詰め、OpenSCADコードを生成してSTLに変換し、
 ワンタップでスライス→プリンタ送信→印刷開始まで行う。個人利用前提（認証機能なし。公開せず
 Tailscale内で運用する）。UI・エラーメッセージ・コミットメッセージはすべて日本語。
@@ -44,8 +44,10 @@ FastAPI + SQLite + 素のJS（ビルド工程なし）。中心となる1ター�
 → model_versions にバージョン追記 (v1, v2, ...) + projects.status を更新
 ```
 
-- **AIの挙動はすべて `app/ai.py` の SYSTEM_PROMPT で制御**している（質問の仕方、P2Sの
+- **AIの挙動はすべて `app/ai.py` のプロンプト定数で制御**している（質問の仕方、P2Sの
   造形サイズ256mm³、FDM印刷制約、出力フォーマット）。モデリング品質の調整はここを触る。
+  共通部品（`_PRINTER_CONTEXT` / `_INTERVIEW_RULES` / `_OUTPUT_FORMAT` / `_SCAD_RULES`）から
+  `SYSTEM_PROMPT`（single用）/ `INTERVIEW_SYSTEM_PROMPT` / `MODELING_SYSTEM_PROMPT` を合成する。
 - チャット履歴には表示用テキスト（SCAD除去後）だけを保存する。コード本体は
   `model_versions` テーブルと `data/models/<project_id>/v<n>.scad|.stl` に置く。
 - プロジェクトのステータス遷移は planning（相談中)→ modeled → printed の一方向。
@@ -67,9 +69,33 @@ claude-code バックエンドの注意点:
   親に固定されるのを防ぐ。通常のマシンでは存在しない変数）。
 - 会話はプロジェクトごとに `projects.claude_session_id` に保存したセッションIDで
   resume する。セッションが無い場合は全履歴を1プロンプトに畳んで送る。
-- モデルは `CLAUDE_CODE_MODEL`（opus/sonnet/haiku の別名、既定 opus）。
 - api バックエンドは `claude-opus-5` + サーバーサイドフォールバック
   （拒否時 `claude-opus-4-8`）+ プロンプトキャッシュ。
+
+### モデルの使い分け（split モード）— 2番目に重要な設計判断
+
+`settings` テーブル（設定画面の ⚙ から変更、`ai.model_config()` が読む）で切り替える。
+既定は `split`。環境変数 `MODEL_MODE` / `INTERVIEW_MODEL` / `CLAUDE_CODE_MODEL` は
+「DBが空のときの初期値」でしかない点に注意。
+
+split の1ターン（`ai._chat_split()`）:
+
+```
+ユーザー発言 → 聞き取り担当(既定 sonnet, プロジェクトのセッションを resume)
+   ├ [READY_TO_MODEL] なし → 質問を返して終了（Opusは呼ばれない）
+   └ [READY_TO_MODEL] + [SPEC] あり
+        → モデリング担当(既定 opus, resume=None の1回きり)に [SPEC] と
+          最新の .scad だけを渡す → SCAD を生成
+```
+
+- **モデリング担当には会話履歴を渡さない**。`[SPEC]` は単体で完結させる契約なので、
+  聞き取り側プロンプトの「[SPEC] は単体で完結させる」指示を弱めないこと。
+- 修正依頼は聞き取り担当が「変更後の完全な仕様」を `[SPEC]` に書き直して引き継ぐ。
+  ベースとなる直前のコードは `main._latest_scad()` が読んで渡す。
+- **モデリング呼び出しが返すセッションIDは捨てる**（`projects.claude_session_id` は
+  聞き取り側の会話のもの。上書きすると会話履歴が切れる）。
+- 聞き取り担当が指示を無視して ```scad を書いた場合も、そのコードは採用せず
+  モデリング担当に作り直させる（安いモデルの造形品質を混ぜない）。
 
 ### 印刷パイプライン（app/slicer.py + app/printer.py）
 
@@ -93,19 +119,24 @@ claude-code バックエンドの注意点:
 
 sqlite3 標準ライブラリのみ。リクエストごとに接続を開閉。スキーマ変更は
 `init_db()` 内の try/except ALTER TABLE で後方互換マイグレーションする流儀
-（例: `claude_session_id` 列）。`with connect()` ブロック内で別接続を開くと
-未コミットのデータが見えないので注意（コミットはブロック終了時）。
+（例: `claude_session_id` 列）。テーブル追加は SCHEMA に
+`CREATE TABLE IF NOT EXISTS` を足すだけでよい（例: `settings`）。
+`with connect()` ブロック内で別接続を開くと未コミットのデータが見えないので注意
+（コミットはブロック終了時）。
 
 ## 環境設定
 
 `.env`（gitignore済み）で設定。テンプレートは `.env.example` に全項目コメント付きで
 ある。`data/` ディレクトリ（DB + 生成ファイル）もgitignore済み。
 
-## 検証状態（2026-08 引き継ぎ時点）
+## 検証状態（2026-08-23 時点）
 
 **実機検証済み**: 対話→SCAD生成→STL変換→3Dプレビューの全パイプライン
 （claude-codeバックエンド実接続 + セッションresume含む）、モバイル/デスクトップUI、
 PWA配信、スライス呼び出しの配管（偽スライサー）。
+split モードも実機確認済み（質問ターンで Opus が呼ばれないこと、`[SPEC]` 引き継ぎで
+sonnet→opus と切り替わること、修正依頼で v2 が生成されることをセッション記録で確認）。
+設定画面の保存・再読込・スマホ幅表示も確認済み。
 
 **未検証（実物がないため）**: 実スライサーCLI（SLICER_CMDの実プロファイル）と
 実P2Sへの送信・印刷開始。`printer.upload_and_print()` は bambulabs_api の
