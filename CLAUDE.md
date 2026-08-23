@@ -56,14 +56,31 @@ UIの検証は Playwright + Chromium でスクリーンショットを撮って�
 ## アーキテクチャ
 
 FastAPI + SQLite + 素のJS（ビルド工程なし）。中心となる1ターンの流れは `app/main.py` の
-`_run_ai_turn()`:
+`_run_ai_turn()`。**HTTPリクエストの中では実行されない**（下記のジョブキュー参照）:
 
 ```
-ユーザー発言 → ai.chat(履歴) → 応答テキストから ai.parse_reply() が
-[MODEL_TITLE] / [MODEL_SUMMARY] / ```scad ブロックを抽出
+ユーザー発言を保存 → jobs.enqueue() で即レスポンス
+    ↓（ワーカースレッド）
+_run_ai_turn() → ai.chat(履歴) → 応答テキストから ai.parse_reply() が
+[MODEL_TITLE] / [MODEL_SUMMARY] / [QUESTIONS] / ```scad ブロックを抽出
 → SCADがあれば modeling.render_stl() (OpenSCAD CLI) で STL化
 → model_versions にバージョン追記 (v1, v2, ...) + projects.status を更新
 ```
+
+### ジョブキュー（app/jobs.py）— 応答を待たせない仕組み
+
+モデリングは数分かかる。UIを固めないため、AI応答はワーカースレッドで処理する。
+
+- `POST /api/projects` と `POST .../messages` は**発言を保存してジョブを積むだけ**で即座に返る。
+  フロントは `GET /api/jobs` を2秒間隔で見て進捗を反映する。
+- **1プロジェクト同時1件**（会話順が入れ替わらないように）、**プロジェクトをまたいで
+  MAX_PARALLEL_JOBS 件まで並行**（既定3）。
+- 待機中ジョブがあるプロジェクトへ追加送信しても新しいジョブは作らない。
+  履歴はジョブ実行時に読み直すため、待機中のジョブがそのまま新しい発言を拾う
+  （`db.create_job()` のこの挙動に依存しているので変えないこと）。
+- `_run_ai_turn()` はワーカーから呼ばれるので **HTTPException を投げてはいけない**。
+  例外メッセージがそのまま `jobs.error` に入り、フロントがチャットに赤字で出す。
+- サーバー再起動で running のまま残ったジョブは `jobs.start()` がエラーとして片付ける。
 
 - **AIの挙動はすべて `app/ai.py` のプロンプト定数で制御**している（質問の仕方、P2Sの
   造形サイズ256mm³、FDM印刷制約、出力フォーマット）。モデリング品質の調整はここを触る。

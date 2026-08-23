@@ -314,6 +314,12 @@ class AIError(Exception):
 
 
 def _mock_chat(history: list[dict]) -> str:
+    # MOCK_DELAY 秒だけ待たせる。応答待ちの挙動（キュー・並行実行）を確認するための設定。
+    delay = float(os.environ.get("MOCK_DELAY", "0") or 0)
+    if delay > 0:
+        import time
+
+        time.sleep(delay)
     user_turns = sum(1 for m in history if m["role"] == "user")
     return MOCK_QUESTION if user_turns <= 1 else MOCK_MODEL
 

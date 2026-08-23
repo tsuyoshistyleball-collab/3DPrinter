@@ -14,11 +14,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import ai, db, modeling, printer, slicer, version
+from app import ai, db, jobs, modeling, printer, slicer, version
 
 app = FastAPI(title="T-Lab")
 
 db.init_db()
+jobs.start(lambda project_id: _run_ai_turn(project_id))
 
 
 class NewProjectRequest(BaseModel):
@@ -70,22 +71,26 @@ def _latest_scad(project_id: int) -> str | None:
     return path.read_text(encoding="utf-8") if path.exists() else None
 
 
-def _run_ai_turn(project_id: int, user_message: str) -> dict:
-    """ユーザー発言を保存し、AI応答（必要ならモデル生成）まで行う。"""
-    db.add_message(project_id, "user", user_message)
+def _run_ai_turn(project_id: int) -> dict:
+    """AI応答（必要ならモデル生成）まで行う。ワーカースレッドから呼ばれる。
+
+    ユーザー発言は送信時点で保存済み。履歴はここで読み直すため、待機中に
+    追加で送られた発言もまとめて拾える。
+    """
     project = db.get_project(project_id)
+    if project is None:
+        return {}  # 処理を待っている間に削除された
     history = [
         {"role": m["role"], "content": _history_text(m)}
         for m in db.list_messages(project_id)
     ]
-    try:
-        reply = ai.chat(
-            history,
-            claude_session_id=project.get("claude_session_id"),
-            previous_scad=_latest_scad(project_id),
-        )
-    except ai.AIError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    if not history:
+        return {}
+    reply = ai.chat(
+        history,
+        claude_session_id=project.get("claude_session_id"),
+        previous_scad=_latest_scad(project_id),
+    )
 
     if reply.session_id:
         db.update_project(project_id, claude_session_id=reply.session_id)
@@ -146,18 +151,24 @@ def _create_model_version(project_id: int, reply: ai.AIReply) -> dict:
 
 @app.get("/api/projects")
 def api_list_projects():
-    return {"projects": db.list_projects(), "openscad_available": modeling.openscad_available()}
+    return {
+        "projects": db.list_projects(),
+        "openscad_available": modeling.openscad_available(),
+        "active_jobs": db.list_active_jobs(),
+    }
 
 
 @app.post("/api/projects")
 def api_create_project(req: NewProjectRequest):
+    """プロジェクトを作って発言を保存し、AI応答はキューに積んですぐ返す。"""
     message = req.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="作りたいものを入力してください")
     title = message if len(message) <= 30 else message[:30] + "…"
     project = db.create_project(title)
-    result = _run_ai_turn(project["id"], message)
-    return {"project": result["project"], "reply": result["reply"], "model": result["model"]}
+    db.add_message(project["id"], "user", message)
+    job = jobs.enqueue(project["id"])
+    return {"project": db.get_project(project["id"]), "job": job}
 
 
 @app.get("/api/projects/{project_id}")
@@ -167,6 +178,7 @@ def api_get_project(project_id: int):
         "project": project,
         "messages": db.list_messages(project_id),
         "models": db.list_model_versions(project_id),
+        "job": jobs.status_for(project_id),
     }
 
 
@@ -179,11 +191,27 @@ def api_delete_project(project_id: int):
 
 @app.post("/api/projects/{project_id}/messages")
 def api_send_message(project_id: int, req: MessageRequest):
+    """発言を保存してキューに積み、すぐ返す。AI応答は /api/jobs で待つ。"""
     _project_or_404(project_id)
     message = req.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="メッセージを入力してください")
-    return _run_ai_turn(project_id, message)
+    db.add_message(project_id, "user", message)
+    return {"job": jobs.enqueue(project_id), "project": db.get_project(project_id)}
+
+
+@app.get("/api/jobs")
+def api_list_jobs():
+    """処理中・待機中のジョブ一覧。フロントはこれを見て進捗を表示する。"""
+    return {"jobs": db.list_active_jobs()}
+
+
+@app.get("/api/jobs/{job_id}")
+def api_get_job(job_id: int):
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="ジョブが見つかりません")
+    return job
 
 
 @app.post("/api/projects/{project_id}/status")

@@ -41,6 +41,7 @@ const state = {
   settings: null,
   backend: null,
   modelOptions: ['haiku', 'sonnet', 'opus'],
+  activeJobs: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -68,6 +69,18 @@ async function api(path, options = {}) {
 async function refreshProjects() {
   const data = await api('/api/projects');
   state.projects = data.projects;
+  if (data.active_jobs) {
+    state.activeJobs = data.active_jobs;
+    syncJobPolling();
+  }
+  renderProjectList();
+}
+
+function isBusy(projectId) {
+  return state.activeJobs.some((j) => j.project_id === projectId);
+}
+
+function renderProjectList() {
   const ul = $('project-list');
   ul.innerHTML = '';
   for (const p of state.projects) {
@@ -77,8 +90,14 @@ async function refreshProjects() {
     title.className = 'title';
     title.textContent = p.title;
     const chip = document.createElement('span');
-    chip.className = `status-chip status-${p.status}`;
-    chip.textContent = STATUS_LABELS[p.status] ?? p.status;
+    // AIが処理中のプロジェクトは、その旨を状態の代わりに出す
+    if (isBusy(p.id)) {
+      chip.className = 'status-chip status-busy';
+      chip.textContent = '⏳ 処理中';
+    } else {
+      chip.className = `status-chip status-${p.status}`;
+      chip.textContent = STATUS_LABELS[p.status] ?? p.status;
+    }
     li.append(title, chip);
     li.onclick = () => openProject(p.id);
     ul.appendChild(li);
@@ -91,6 +110,7 @@ async function openProject(id) {
   showChat(data.project);
   renderMessages(data.messages);
   setModels(data.models);
+  updateChatPending();
   refreshProjects();
 }
 
@@ -248,45 +268,45 @@ function submitAnswers(fields) {
   sendChat(lines.join('\n'));
 }
 
-function setLoading(on, text = 'AIが考えています…（1分ほどかかることがあります）') {
+function setLoading(on, text = '処理しています…') {
   $('loading-text').textContent = text;
   $('loading-overlay').classList.toggle('hidden', !on);
-}
-
-async function handleAITurn(promise) {
-  setLoading(true);
-  try {
-    const data = await promise;
-    return data;
-  } catch (e) {
-    appendMessage('error', e.message);
-    return null;
-  } finally {
-    setLoading(false);
-  }
 }
 
 $('welcome-form').onsubmit = async (e) => {
   e.preventDefault();
   const message = $('welcome-input').value.trim();
   if (!message) return;
-  const data = await handleAITurn(
-    api('/api/projects', { method: 'POST', body: JSON.stringify({ message }) })
-  );
-  if (data) await openProject(data.project.id);
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  try {
+    // AI応答はサーバー側のキューで処理されるので、ここでは待たない
+    const data = await api('/api/projects', { method: 'POST', body: JSON.stringify({ message }) });
+    trackJob(data.job);
+    await openProject(data.project.id);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 async function sendChat(message) {
   if (!message || state.currentId === null) return;
+  const projectId = state.currentId;
   appendMessage('user', message);
   $('chat-input').value = '';
-  const data = await handleAITurn(
-    api(`/api/projects/${state.currentId}/messages`, {
+  try {
+    const data = await api(`/api/projects/${projectId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ message }),
-    })
-  );
-  if (data) await openProject(state.currentId);
+    });
+    trackJob(data.job);
+    if (state.currentId === projectId) updateChatPending();
+    renderProjectList();
+  } catch (e) {
+    appendMessage('error', e.message);
+  }
 }
 
 $('chat-form').onsubmit = (e) => {
@@ -550,6 +570,64 @@ $('settings-save').onclick = async () => {
     alert(`設定を保存できませんでした:\n${e.message}`);
   }
 };
+
+// ---------- ジョブ（AI応答）の進捗監視 ----------
+
+let jobPollTimer = null;
+
+function trackJob(job) {
+  if (!job) return;
+  if (!state.activeJobs.some((j) => j.id === job.id)) state.activeJobs.push(job);
+  syncJobPolling();
+}
+
+function syncJobPolling() {
+  const needed = state.activeJobs.length > 0;
+  if (needed && !jobPollTimer) jobPollTimer = setInterval(refreshJobs, 2000);
+  if (!needed && jobPollTimer) {
+    clearInterval(jobPollTimer);
+    jobPollTimer = null;
+  }
+}
+
+// 表示中のプロジェクトが処理待ちなら「AIが考えています」を出す
+function updateChatPending() {
+  const pending = state.currentId !== null && isBusy(state.currentId);
+  $('chat-pending').classList.toggle('hidden', !pending);
+}
+
+async function refreshJobs() {
+  let jobs;
+  try {
+    jobs = (await api('/api/jobs')).jobs ?? [];
+  } catch {
+    return; // 一時的な通信失敗は次の巡回で拾う
+  }
+  const previous = state.activeJobs;
+  state.activeJobs = jobs;
+
+  const stillActive = new Set(jobs.map((j) => j.id));
+  const finished = previous.filter((j) => !stillActive.has(j.id));
+
+  renderProjectList();
+  updateChatPending();
+  syncJobPolling();
+
+  if (!finished.length) return;
+  await refreshProjects();
+  for (const job of finished) {
+    // 失敗していたら理由をチャットに出す（成功時は再読み込みで応答が現れる）
+    try {
+      const result = await api(`/api/jobs/${job.id}`);
+      if (result.status === 'error' && job.project_id === state.currentId) {
+        appendMessage('error', result.error ?? 'AIの処理に失敗しました。');
+      }
+    } catch { /* ジョブが消えていても致命的ではない */ }
+  }
+  if (finished.some((j) => j.project_id === state.currentId)) {
+    await openProject(state.currentId);
+  }
+}
 
 // ---------- バージョン表示 ----------
 

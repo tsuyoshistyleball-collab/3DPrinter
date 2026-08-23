@@ -90,6 +90,7 @@ body {
   border-radius: 999px;
   white-space: nowrap;
 }
+.status-busy     { background: #e0e7ff; color: #3730a3; }
 .status-planning { background: #fef3c7; color: #92400e; }
 .status-modeled  { background: #dbeafe; color: #1e40af; }
 .status-printed  { background: #dcfce7; color: #166534; }
@@ -269,6 +270,29 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .msg.user { align-self: flex-end; background: var(--user-bubble); border-bottom-right-radius: 4px; }
 .msg.assistant { align-self: flex-start; background: var(--ai-bubble); border-bottom-left-radius: 4px; }
 .msg.error { align-self: center; background: #fee2e2; color: #991b1b; font-size: 13px; }
+
+/* AIの応答待ち。画面全体は塞がず、他のプロジェクトの操作を続けられるようにする */
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #3730a3;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin-top: 8px;
+}
+.pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4f46e5;
+  flex: 0 0 auto;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 #chat-form { display: flex; gap: 10px; padding-top: 12px; align-items: flex-end; }
 #chat-form textarea { flex: 1; }

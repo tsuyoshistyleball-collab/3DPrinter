@@ -54,6 +54,10 @@
         <button id="delete-project-btn" title="このプロジェクトを削除">🗑</button>
       </div>
       <div id="messages"></div>
+      <div id="chat-pending" class="pending hidden">
+        <span class="pending-dot"></span>
+        AIが考えています… 待っている間、他の相談を並行して進められます
+      </div>
       <form id="chat-form">
         <textarea id="chat-input" rows="2" placeholder="返答や修正依頼を入力…"></textarea>
         <button type="submit" id="send-btn">送信</button>

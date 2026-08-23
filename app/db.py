@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS messages (
     questions TEXT,
     created_at TEXT NOT NULL
 );
+-- AI応答はバックグラウンドで処理する。1プロジェクトにつき同時に1件だけ走らせ、
+-- 別プロジェクトの相談は並行して進められる。
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'queued',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -73,6 +84,79 @@ def init_db() -> None:
             conn.execute("ALTER TABLE messages ADD COLUMN questions TEXT")
         except sqlite3.OperationalError:
             pass  # 既に存在する
+
+
+# ---------- ジョブ（AI応答のバックグラウンド処理） ----------
+
+JOB_ACTIVE = ("queued", "running")
+
+
+def create_job(project_id: int) -> dict:
+    """待機中のジョブがあればそれを返す（履歴は実行時に読むので新しい発言も拾える）。"""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE project_id = ? AND status = 'queued' ORDER BY id LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        if row:
+            return dict(row)
+        cur = conn.execute(
+            "INSERT INTO jobs (project_id, status, created_at) VALUES (?, 'queued', ?)",
+            (project_id, _now()),
+        )
+        job_id = cur.lastrowid
+    return get_job(job_id)
+
+
+def get_job(job_id: int) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_active_jobs() -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE status IN ('queued', 'running') ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def claim_next_job(busy_project_ids: set[int]) -> dict | None:
+    """実行中でないプロジェクトの待機ジョブを1件だけ running にして返す。"""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE status = 'queued' ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            if row["project_id"] in busy_project_ids:
+                continue
+            conn.execute(
+                "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
+                (_now(), row["id"]),
+            )
+            job = dict(row)
+            job["status"] = "running"
+            return job
+    return None
+
+
+def finish_job(job_id: int, error: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+            ("error" if error else "done", error, _now(), job_id),
+        )
+
+
+def fail_running_jobs(reason: str) -> int:
+    """サーバー再起動で宙に浮いた running ジョブを片付ける。"""
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'error', error = ?, finished_at = ? WHERE status = 'running'",
+            (reason, _now()),
+        )
+        return cur.rowcount
 
 
 def get_settings() -> dict:
