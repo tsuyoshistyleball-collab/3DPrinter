@@ -82,6 +82,21 @@ _run_ai_turn() → ai.chat(履歴) → 応答テキストから ai.parse_reply()
   例外メッセージがそのまま `jobs.error` に入り、フロントがチャットに赤字で出す。
 - サーバー再起動で running のまま残ったジョブは `jobs.start()` がエラーとして片付ける。
 
+### 進捗表示とトークン計測
+
+`ai.Progress` がワーカーとAI呼び出しの間の通知口。`jobs._DbProgress` が jobs テーブルへ書く。
+
+- 段階: `interview` → `modeling` → `rendering`（single モードは `thinking` の1段階）。
+- 生成中の文字数は `include_partial_messages=True` で受け取る StreamEvent の
+  `content_block_delta` を数えたもの。**Opusは書き始めるまでに数分「考える」ことがあり、
+  その間カウンタは0のまま**なので、フロントは0のとき別の文言（考え中）を出している。
+  止まったように見せないための作りなので消さないこと。
+- 所要時間の目安は `db.typical_duration_seconds()`（過去20件の中央値）。モデリングは
+  実測で約9分半かかった例がある。
+- トークンは ResultMessage の `model_usage` から取り、`usage_log` テーブルへ記録する。
+  **このテーブルはプロジェクトへの外部キーを持たない**（プロジェクトを消しても
+  消費実績は残す）。設定画面に累計と直近24時間を表示する。
+
 - **AIの挙動はすべて `app/ai.py` のプロンプト定数で制御**している（質問の仕方、P2Sの
   造形サイズ256mm³、FDM印刷制約、出力フォーマット）。モデリング品質の調整はここを触る。
   共通部品（`_PRINTER_CONTEXT` / `_INTERVIEW_RULES` / `_QUESTION_FORMAT` / `_OUTPUT_FORMAT` /

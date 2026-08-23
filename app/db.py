@@ -37,9 +37,25 @@ CREATE TABLE IF NOT EXISTS jobs (
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'queued',
     error TEXT,
+    stage TEXT,
+    stage_started_at TEXT,
+    progress_chars INTEGER NOT NULL DEFAULT 0,
+    produced_model INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT
+);
+-- トークン消費の記録。プロジェクトを消しても残るよう外部キーを持たせない。
+CREATE TABLE IF NOT EXISTS usage_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    model TEXT NOT NULL,
+    role TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL
 );
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -84,6 +100,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE messages ADD COLUMN questions TEXT")
         except sqlite3.OperationalError:
             pass  # 既に存在する
+        for column, ddl in (
+            ("stage", "TEXT"),
+            ("stage_started_at", "TEXT"),
+            ("progress_chars", "INTEGER NOT NULL DEFAULT 0"),
+            ("produced_model", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {ddl}")
+            except sqlite3.OperationalError:
+                pass  # 既に存在する
 
 
 # ---------- ジョブ（AI応答のバックグラウンド処理） ----------
@@ -141,12 +167,105 @@ def claim_next_job(busy_project_ids: set[int]) -> dict | None:
     return None
 
 
-def finish_job(job_id: int, error: str | None = None) -> None:
+def set_job_stage(job_id: int, stage: str) -> None:
+    """処理段階を進める。文字数カウンタは段階ごとにリセットする。"""
     with connect() as conn:
         conn.execute(
-            "UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-            ("error" if error else "done", error, _now(), job_id),
+            "UPDATE jobs SET stage = ?, stage_started_at = ?, progress_chars = 0 WHERE id = ?",
+            (stage, _now(), job_id),
         )
+
+
+def set_job_progress(job_id: int, chars: int) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE jobs SET progress_chars = ? WHERE id = ?", (chars, job_id))
+
+
+def finish_job(job_id: int, error: str | None = None, produced_model: bool = False) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = ?, error = ?, finished_at = ?, stage = NULL, "
+            "produced_model = ? WHERE id = ?",
+            ("error" if error else "done", error, _now(), 1 if produced_model else 0, job_id),
+        )
+
+
+def typical_duration_seconds(produced_model: bool) -> float | None:
+    """直近の同種ジョブの所要時間の中央値。所要時間の目安表示に使う。"""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT started_at, finished_at FROM jobs "
+            "WHERE status = 'done' AND produced_model = ? AND started_at IS NOT NULL "
+            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 20",
+            (1 if produced_model else 0,),
+        ).fetchall()
+    durations = []
+    for r in rows:
+        try:
+            start = datetime.fromisoformat(r["started_at"])
+            end = datetime.fromisoformat(r["finished_at"])
+        except (TypeError, ValueError):
+            continue
+        durations.append((end - start).total_seconds())
+    if not durations:
+        return None
+    durations.sort()
+    return durations[len(durations) // 2]
+
+
+# ---------- トークン消費 ----------
+
+def log_usage(
+    model: str,
+    role: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    cost_usd: float | None = None,
+) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO usage_log (created_at, model, role, input_tokens, output_tokens, "
+            "cache_read_tokens, cache_write_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _now(),
+                model,
+                role,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                cost_usd,
+            ),
+        )
+
+
+_USAGE_COLUMNS = (
+    "COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+    "COALESCE(SUM(output_tokens), 0) AS output_tokens, "
+    "COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens, "
+    "COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens, "
+    "COUNT(*) AS calls"
+)
+
+
+def usage_summary(since: str | None = None) -> dict:
+    where, params = ("WHERE created_at >= ?", (since,)) if since else ("", ())
+    with connect() as conn:
+        total = dict(
+            conn.execute(f"SELECT {_USAGE_COLUMNS} FROM usage_log {where}", params).fetchone()
+        )
+        by_model = [
+            dict(r)
+            for r in conn.execute(
+                f"SELECT model, {_USAGE_COLUMNS} FROM usage_log {where} "
+                "GROUP BY model ORDER BY output_tokens DESC",
+                params,
+            ).fetchall()
+        ]
+    total["by_model"] = by_model
+    return total
 
 
 def fail_running_jobs(reason: str) -> int:

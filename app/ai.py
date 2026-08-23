@@ -16,7 +16,7 @@ MOCK_AI=1 → mock、ANTHROPIC_API_KEY あり → api、それ以外 → claude-
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app import db
@@ -213,6 +213,8 @@ class AIReply:
     session_id: str | None = None
     # [{"text": 質問文, "choices": [選択肢, ...]}, ...]。タップで答える UI に使う
     questions: list[dict] | None = None
+    # このターンで消費したトークン。1ターンで複数回呼ぶ split モードでは複数件入る
+    usage: list[dict] = field(default_factory=list)
 
 
 MOCK_QUESTION = """\
@@ -324,10 +326,28 @@ def _mock_chat(history: list[dict]) -> str:
     return MOCK_QUESTION if user_turns <= 1 else MOCK_MODEL
 
 
+class Progress:
+    """処理の進み具合をUIへ伝えるための通知口。
+
+    stage(名前) で段階の切り替わりを、chars(数) で生成中の文字数を知らせる。
+    ジョブワーカーが実装を差し込む。差し込まれない場合は何もしない。
+    """
+
+    def stage(self, name: str) -> None:
+        pass
+
+    def chars(self, count: int) -> None:
+        pass
+
+
+_NO_PROGRESS = Progress()
+
+
 def chat(
     history: list[dict],
     claude_session_id: str | None = None,
     previous_scad: str | None = None,
+    progress: Progress | None = None,
 ) -> AIReply:
     """会話履歴 [{role, content}, ...] を渡して AI の応答を得る。
 
@@ -336,13 +356,15 @@ def chat(
     previous_scad は最新バージョンのコード。split モードで修正依頼を受けたとき、
     モデリング担当（会話を見ていない）へベースとして渡す。
     """
+    progress = progress or _NO_PROGRESS
     backend = backend_name()
     if backend == "mock":
+        progress.stage("modeling")
         return parse_reply(_mock_chat(history))
     cfg = model_config()
     if cfg["model_mode"] == "single":
-        return _chat_single(history, claude_session_id, backend, cfg["modeling_model"])
-    return _chat_split(history, claude_session_id, previous_scad, backend, cfg)
+        return _chat_single(history, claude_session_id, backend, cfg["modeling_model"], progress)
+    return _chat_split(history, claude_session_id, previous_scad, backend, cfg, progress)
 
 
 def _render_transcript(history: list[dict]) -> str:
@@ -357,6 +379,42 @@ def _render_transcript(history: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def _extract_usage(result, model_alias: str) -> dict | None:
+    """ResultMessage からトークン使用量を取り出す。
+
+    model_usage（モデル別の内訳）があればそれを優先し、無ければ usage を使う。
+    """
+    per_model = getattr(result, "model_usage", None) or {}
+    if per_model:
+        totals = {
+            "model": model_alias,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_usd": 0.0,
+        }
+        for entry in per_model.values():
+            totals["input_tokens"] += entry.get("inputTokens", 0) or 0
+            totals["output_tokens"] += entry.get("outputTokens", 0) or 0
+            totals["cache_read_tokens"] += entry.get("cacheReadInputTokens", 0) or 0
+            totals["cache_write_tokens"] += entry.get("cacheCreationInputTokens", 0) or 0
+            totals["cost_usd"] += entry.get("costUSD", 0.0) or 0.0
+        return totals
+
+    usage = getattr(result, "usage", None)
+    if not usage:
+        return None
+    return {
+        "model": model_alias,
+        "input_tokens": usage.get("input_tokens", 0) or 0,
+        "output_tokens": usage.get("output_tokens", 0) or 0,
+        "cache_read_tokens": usage.get("cache_read_input_tokens", 0) or 0,
+        "cache_write_tokens": usage.get("cache_creation_input_tokens", 0) or 0,
+        "cost_usd": getattr(result, "total_cost_usd", None),
+    }
+
+
 def _require_text(text: str | None) -> str:
     if not text or not text.strip():
         raise AIError(
@@ -367,17 +425,23 @@ def _require_text(text: str | None) -> str:
 
 
 def _chat_single(
-    history: list[dict], session_id: str | None, backend: str, model: str
+    history: list[dict], session_id: str | None, backend: str, model: str, progress: Progress
 ) -> AIReply:
     """1つのモデルが質問もコード生成も担当する（従来の動作）。"""
+    progress.stage("thinking")
+    usage = None
     if backend == "claude-code":
         prompt = history[-1]["content"] if session_id else _render_transcript(history)
-        text, new_session_id = _claude_code_call(SYSTEM_PROMPT, prompt, model, session_id)
+        text, new_session_id, usage = _claude_code_call(
+            SYSTEM_PROMPT, prompt, model, session_id, on_chars=progress.chars
+        )
     else:
-        text = _api_call(SYSTEM_PROMPT, history, model)
+        text, usage = _api_call(SYSTEM_PROMPT, history, model)
         new_session_id = None
     reply = parse_reply(_require_text(text))
     reply.session_id = new_session_id
+    if usage:
+        reply.usage.append({**usage, "role": "single"})
     return reply
 
 
@@ -415,22 +479,30 @@ def _chat_split(
     previous_scad: str | None,
     backend: str,
     cfg: dict,
+    progress: Progress,
 ) -> AIReply:
     """質問は安いモデル、OpenSCAD 生成だけ高性能モデルに担当させる。"""
     # --- 1. 聞き取り（安いモデル。プロジェクトの会話セッションを継続する）---
+    progress.stage("interview")
     if backend == "claude-code":
         prompt = history[-1]["content"] if session_id else _render_transcript(history)
-        raw, new_session_id = _claude_code_call(
-            INTERVIEW_SYSTEM_PROMPT, prompt, cfg["interview_model"], session_id
+        raw, new_session_id, usage = _claude_code_call(
+            INTERVIEW_SYSTEM_PROMPT,
+            prompt,
+            cfg["interview_model"],
+            session_id,
+            on_chars=progress.chars,
         )
     else:
-        raw = _api_call(INTERVIEW_SYSTEM_PROMPT, history, cfg["interview_model"])
+        raw, usage = _api_call(INTERVIEW_SYSTEM_PROMPT, history, cfg["interview_model"])
         new_session_id = None
     raw = _require_text(raw)
 
     spec = _extract_spec(raw)
     reply = parse_reply(_strip_handoff(raw))
     reply.session_id = new_session_id
+    if usage:
+        reply.usage.append({**usage, "role": "interview"})
 
     # 聞き取り担当が指示に反してコードを書いた場合も、そのコードは採用せず
     # モデリング担当に作り直させる（安いモデルの造形品質を混ぜないため）。
@@ -441,18 +513,25 @@ def _chat_split(
         return reply  # まだ質問中
 
     # --- 2. モデリング（高性能モデル。仕様だけを渡す1回きりの呼び出し）---
+    progress.stage("modeling")
     modeling_prompt = _build_modeling_prompt(spec, previous_scad)
     if backend == "claude-code":
         # 会話セッションは聞き取り担当のものを維持する。ここで返るセッションIDは捨てる。
-        raw_model, _ = _claude_code_call(
-            MODELING_SYSTEM_PROMPT, modeling_prompt, cfg["modeling_model"], None
+        raw_model, _, model_usage = _claude_code_call(
+            MODELING_SYSTEM_PROMPT,
+            modeling_prompt,
+            cfg["modeling_model"],
+            None,
+            on_chars=progress.chars,
         )
     else:
-        raw_model = _api_call(
+        raw_model, model_usage = _api_call(
             MODELING_SYSTEM_PROMPT,
             [{"role": "user", "content": modeling_prompt}],
             cfg["modeling_model"],
         )
+    if model_usage:
+        reply.usage.append({**model_usage, "role": "modeling"})
 
     modeled = parse_reply(raw_model or "")
     if not modeled.scad_code:
@@ -469,13 +548,22 @@ def _chat_split(
         model_title=modeled.model_title,
         model_summary=modeled.model_summary,
         session_id=new_session_id,
+        usage=reply.usage,   # 聞き取り+モデリングの2回分
     )
 
 
 def _claude_code_call(
-    system_prompt: str, prompt: str, model: str, session_id: str | None
-) -> tuple[str, str | None]:
-    """Claude Agent SDK（サブスクリプションの利用枠）を1往復だけ呼ぶ。"""
+    system_prompt: str,
+    prompt: str,
+    model: str,
+    session_id: str | None,
+    on_chars=None,
+) -> tuple[str, str | None, dict | None]:
+    """Claude Agent SDK（サブスクリプションの利用枠）を1往復だけ呼ぶ。
+
+    on_chars(累計文字数) は生成中に随時呼ばれる（進捗表示用）。
+    戻り値は (本文, セッションID, トークン使用量)。
+    """
     import asyncio
 
     try:
@@ -486,6 +574,7 @@ def _claude_code_call(
             ProcessError,
             ClaudeSDKError,
             ResultMessage,
+            StreamEvent,
             TextBlock,
             query,
         )
@@ -505,21 +594,35 @@ def _claude_code_call(
         resume=session_id,
         cwd=str(workdir),
         setting_sources=[],     # ユーザーの CLAUDE.md 等は読み込まない
+        # 生成中の文字数を進捗として出すため、部分メッセージを受け取る
+        include_partial_messages=on_chars is not None,
     )
 
-    async def run() -> tuple[str, str | None]:
+    async def run() -> tuple[str, str | None, dict | None]:
         texts: list[str] = []
         new_session_id = None
+        usage = None
+        streamed = 0
         async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
+            if isinstance(message, StreamEvent):
+                # 生の Anthropic ストリームイベント。text_delta の分だけ数える
+                event = message.event or {}
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta") or {}
+                    text = delta.get("text") or delta.get("thinking") or ""
+                    if text:
+                        streamed += len(text)
+                        on_chars(streamed)
+            elif isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         texts.append(block.text)
             elif isinstance(message, ResultMessage):
                 new_session_id = message.session_id
+                usage = _extract_usage(message, model)
                 if message.is_error and not texts:
                     raise AIError(f"Claude Code がエラーを返しました: {message.result or '不明なエラー'}")
-        return "".join(texts), new_session_id
+        return "".join(texts), new_session_id, usage
 
     # ANTHROPIC_API_KEY が見えているとサブスクリプションではなく API 従量課金が
     # 優先されてしまうため、子プロセスからは隠す。CLAUDE_CODE_SESSION_ID は
@@ -547,8 +650,8 @@ def _claude_code_call(
         os.environ.update(hidden)
 
 
-def _api_call(system_prompt: str, messages: list[dict], model: str) -> str:
-    """Anthropic API（APIキー・従量課金）を呼ぶ。"""
+def _api_call(system_prompt: str, messages: list[dict], model: str) -> tuple[str, dict | None]:
+    """Anthropic API（APIキー・従量課金）を呼ぶ。戻り値は (本文, トークン使用量)。"""
     import anthropic
 
     client = anthropic.Anthropic()
@@ -593,4 +696,13 @@ def _api_call(system_prompt: str, messages: list[dict], model: str) -> str:
     if response.stop_reason == "max_tokens":
         raise AIError("応答が長すぎて途中で切れました。依頼を分割して試してください。")
 
-    return "".join(block.text for block in response.content if block.type == "text")
+    u = response.usage
+    usage = {
+        "model": model,
+        "input_tokens": getattr(u, "input_tokens", 0) or 0,
+        "output_tokens": getattr(u, "output_tokens", 0) or 0,
+        "cache_read_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+        "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+        "cost_usd": None,
+    }
+    return "".join(block.text for block in response.content if block.type == "text"), usage

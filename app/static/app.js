@@ -532,6 +532,56 @@ function updateSettingsMode() {
   $('modeling-label').textContent = split ? 'モデリングの担当' : '使用するモデル';
 }
 
+function formatTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return `${(v / 1000000).toFixed(2)}M`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  return String(v);
+}
+
+function usageRow(label, u) {
+  const row = document.createElement('div');
+  row.className = 'usage-row';
+  const name = document.createElement('span');
+  name.className = 'usage-label';
+  name.textContent = label;
+  const value = document.createElement('span');
+  // 入力はキャッシュ読み込みを含めた実際の送信量、出力は生成量
+  const input = (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0) + (u.cache_write_tokens ?? 0);
+  value.textContent = `入力 ${formatTokens(input)} / 出力 ${formatTokens(u.output_tokens)}（${u.calls ?? 0}回）`;
+  row.append(name, value);
+  return row;
+}
+
+async function renderUsage() {
+  const box = $('usage-summary');
+  box.innerHTML = '';
+  let data;
+  try {
+    data = await api('/api/usage');
+  } catch {
+    box.textContent = '取得できませんでした。';
+    return;
+  }
+  if (!data.total?.calls) {
+    box.textContent = 'まだ記録がありません。';
+    return;
+  }
+  box.appendChild(usageRow('直近24時間', data.last_24h));
+  box.appendChild(usageRow('累計', data.total));
+  for (const m of data.total.by_model ?? []) {
+    const row = usageRow(`　${m.model}`, m);
+    row.classList.add('usage-sub');
+    box.appendChild(row);
+  }
+  const note = document.createElement('p');
+  note.className = 'hint';
+  note.textContent = state.backend === 'claude-code'
+    ? 'サブスクリプションの利用枠から消費されます（追加課金なし）。'
+    : '従量課金の対象です。';
+  box.appendChild(note);
+}
+
 function openSettings() {
   const s = state.settings ?? { model_mode: 'split', interview_model: 'sonnet', modeling_model: 'opus' };
   for (const radio of document.querySelectorAll('input[name="model-mode"]')) {
@@ -542,6 +592,7 @@ function openSettings() {
   updateSettingsMode();
   $('settings-note').textContent = BACKEND_NOTES[state.backend] ?? '';
   $('settings-modal').classList.remove('hidden');
+  renderUsage();
 }
 
 $('settings-btn').onclick = openSettings;
@@ -590,19 +641,97 @@ function syncJobPolling() {
   }
 }
 
-// 表示中のプロジェクトが処理待ちなら「AIが考えています」を出す
-function updateChatPending() {
-  const pending = state.currentId !== null && isBusy(state.currentId);
-  $('chat-pending').classList.toggle('hidden', !pending);
+// 段階の定義。表示順がそのまま処理順になる。
+const STAGES = [
+  { key: 'interview', label: '内容を整理' },
+  { key: 'modeling', label: '3Dモデルを設計' },
+  { key: 'rendering', label: 'STLに変換' },
+];
+// 書き出したあとの表示（文字数が付く）
+const STAGE_MESSAGES = {
+  queued: '順番待ちです…',
+  interview: '内容を整理しています…',
+  thinking: 'AIが書いています…',
+  modeling: '設計を書き出しています…',
+  rendering: 'STLに変換しています…',
+};
+// まだ1文字も出ていない間の表示。Opusは書き始める前に数分考えることがある。
+const THINKING_MESSAGES = {
+  interview: 'ご依頼を読んでいます…',
+  thinking: 'AIが考えています…',
+  modeling: '形と寸法をじっくり考えています…',
+};
+
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return s < 60 ? `${s}秒` : `${Math.floor(s / 60)}分${String(s % 60).padStart(2, '0')}秒`;
 }
 
+// 表示中のプロジェクトが処理待ちなら進捗を出す
+function updateChatPending() {
+  const job = state.currentId === null
+    ? null
+    : state.activeJobs.find((j) => j.project_id === state.currentId);
+  $('chat-pending').classList.toggle('hidden', !job);
+  if (!job) return;
+
+  const stage = job.status === 'queued' ? 'queued' : (job.stage ?? 'thinking');
+  const chars = job.progress_chars ?? 0;
+  // 書き始める前は考えている時間。数分かかることがあるので、止まって見えないよう文言を分ける
+  const label = chars > 0
+    ? `${STAGE_MESSAGES[stage] ?? 'AIが考えています…'} ${chars.toLocaleString()}文字`
+    : (THINKING_MESSAGES[stage] ?? STAGE_MESSAGES[stage] ?? 'AIが考えています…');
+  $('pending-stage').textContent = label;
+
+  // 経過時間と、過去の実績から出した目安
+  const startedAt = job.started_at ?? job.created_at;
+  const elapsed = startedAt ? (Date.now() - new Date(startedAt).getTime()) / 1000 : 0;
+  // モデリング段階まで来ていればモデル生成の実績を、そうでなければ質問往復の実績を使う。
+  // まだ実績が無い種類のときはもう一方で代用する（初回でも目安を出せるように）。
+  const t = state.typicalSeconds ?? {};
+  const modelingStage = stage === 'modeling' || stage === 'rendering';
+  const typical = modelingStage ? (t.modeling ?? t.question) : (t.question ?? t.modeling);
+  $('pending-elapsed').textContent = typical
+    ? `${formatDuration(elapsed)} / 目安 約${formatDuration(typical)}`
+    : formatDuration(elapsed);
+
+  // 進捗バーは経過/目安。目安が無い間や超過時は動き続ける不定表示にする
+  const fill = $('pending-bar-fill');
+  const ratio = typical ? Math.min(elapsed / typical, 1) : 0;
+  fill.classList.toggle('indeterminate', !typical || ratio >= 1);
+  fill.style.width = typical && ratio < 1 ? `${Math.round(ratio * 100)}%` : '';
+
+  renderStageSteps(stage);
+}
+
+function renderStageSteps(current) {
+  const box = $('pending-steps');
+  const index = STAGES.findIndex((s) => s.key === current);
+  box.innerHTML = '';
+  for (const [i, step] of STAGES.entries()) {
+    const el = document.createElement('span');
+    // index が -1（単一モデル運用や順番待ち）のときはどれも進行中にしない
+    const done = index >= 0 && i < index;
+    el.className = `step${done ? ' done' : ''}${index === i ? ' current' : ''}`;
+    el.textContent = `${done ? '✓ ' : ''}${step.label}`;
+    box.appendChild(el);
+  }
+}
+
+// 経過時間を秒単位で動かす（ジョブの巡回は2秒間隔なので別に回す）
+setInterval(() => {
+  if (!$('chat-pending').classList.contains('hidden')) updateChatPending();
+}, 1000);
+
 async function refreshJobs() {
-  let jobs;
+  let data;
   try {
-    jobs = (await api('/api/jobs')).jobs ?? [];
+    data = await api('/api/jobs');
   } catch {
     return; // 一時的な通信失敗は次の巡回で拾う
   }
+  const jobs = data.jobs ?? [];
+  state.typicalSeconds = data.typical_seconds ?? state.typicalSeconds;
   const previous = state.activeJobs;
   state.activeJobs = jobs;
 

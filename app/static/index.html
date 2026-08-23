@@ -55,8 +55,14 @@
       </div>
       <div id="messages"></div>
       <div id="chat-pending" class="pending hidden">
-        <span class="pending-dot"></span>
-        AIが考えています… 待っている間、他の相談を並行して進められます
+        <div class="pending-head">
+          <span class="pending-dot"></span>
+          <span id="pending-stage">AIが考えています…</span>
+          <span id="pending-elapsed" class="pending-elapsed"></span>
+        </div>
+        <div class="pending-bar"><div id="pending-bar-fill"></div></div>
+        <div id="pending-steps" class="pending-steps"></div>
+        <div class="pending-note">待っている間、他の相談を並行して進められます</div>
       </div>
       <form id="chat-form">
         <textarea id="chat-input" rows="2" placeholder="返答や修正依頼を入力…"></textarea>
@@ -111,6 +117,11 @@
         <span id="modeling-label">モデリングの担当</span>
         <select id="modeling-model"></select>
       </label>
+    </section>
+
+    <section class="setting-group">
+      <h3>トークン消費量</h3>
+      <div id="usage-summary" class="usage"></div>
     </section>
 
     <p class="hint" id="settings-note"></p>

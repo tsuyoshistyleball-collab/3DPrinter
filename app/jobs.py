@@ -12,9 +12,10 @@
 import logging
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
-from app import db
+from app import ai, db
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ _runner = None                        # ジョブ本体を実行する関数（m
 
 
 def start(runner) -> None:
-    """ワーカーを起動する。runner(project_id) が1ターン分の処理を行う。"""
+    """ワーカーを起動する。runner(project_id, progress) が1ターン分の処理を行う。"""
     global _pool, _dispatcher, _runner
     if _dispatcher is not None:
         return
@@ -73,11 +74,34 @@ def _dispatch_loop() -> None:
             _pool.submit(_run_job, job)
 
 
+class _DbProgress(ai.Progress):
+    """進捗を jobs テーブルへ書き戻す。文字数は書き込みが多くなるので間引く。"""
+
+    WRITE_INTERVAL = 0.7  # 秒
+
+    def __init__(self, job_id: int):
+        self._job_id = job_id
+        self._last_write = 0.0
+
+    def stage(self, name: str) -> None:
+        self._last_write = 0.0
+        db.set_job_stage(self._job_id, name)
+
+    def chars(self, count: int) -> None:
+        now = time.monotonic()
+        if now - self._last_write < self.WRITE_INTERVAL:
+            return
+        self._last_write = now
+        db.set_job_progress(self._job_id, count)
+
+
 def _run_job(job: dict) -> None:
     project_id = job["project_id"]
+    produced_model = False
     try:
-        _runner(project_id)
-        db.finish_job(job["id"])
+        result = _runner(project_id, _DbProgress(job["id"])) or {}
+        produced_model = bool(result.get("model"))
+        db.finish_job(job["id"], produced_model=produced_model)
     except Exception as e:  # ワーカーは何があっても落とさない
         logger.exception("ジョブ %s の処理に失敗しました", job["id"])
         db.finish_job(job["id"], error=str(e))

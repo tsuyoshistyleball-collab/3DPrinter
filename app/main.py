@@ -3,6 +3,7 @@
 起動: uvicorn app.main:app --reload
 """
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ from app import ai, db, jobs, modeling, printer, slicer, version
 app = FastAPI(title="T-Lab")
 
 db.init_db()
-jobs.start(lambda project_id: _run_ai_turn(project_id))
+jobs.start(lambda project_id, progress: _run_ai_turn(project_id, progress))
 
 
 class NewProjectRequest(BaseModel):
@@ -71,12 +72,13 @@ def _latest_scad(project_id: int) -> str | None:
     return path.read_text(encoding="utf-8") if path.exists() else None
 
 
-def _run_ai_turn(project_id: int) -> dict:
+def _run_ai_turn(project_id: int, progress: ai.Progress | None = None) -> dict:
     """AI応答（必要ならモデル生成）まで行う。ワーカースレッドから呼ばれる。
 
     ユーザー発言は送信時点で保存済み。履歴はここで読み直すため、待機中に
     追加で送られた発言もまとめて拾える。
     """
+    progress = progress or ai.Progress()
     project = db.get_project(project_id)
     if project is None:
         return {}  # 処理を待っている間に削除された
@@ -90,7 +92,19 @@ def _run_ai_turn(project_id: int) -> dict:
         history,
         claude_session_id=project.get("claude_session_id"),
         previous_scad=_latest_scad(project_id),
+        progress=progress,
     )
+
+    for entry in reply.usage:
+        db.log_usage(
+            model=entry.get("model", "unknown"),
+            role=entry.get("role", "unknown"),
+            input_tokens=entry.get("input_tokens", 0),
+            output_tokens=entry.get("output_tokens", 0),
+            cache_read_tokens=entry.get("cache_read_tokens", 0),
+            cache_write_tokens=entry.get("cache_write_tokens", 0),
+            cost_usd=entry.get("cost_usd"),
+        )
 
     if reply.session_id:
         db.update_project(project_id, claude_session_id=reply.session_id)
@@ -98,6 +112,7 @@ def _run_ai_turn(project_id: int) -> dict:
     new_model = None
     display_text = reply.text
     if reply.scad_code:
+        progress.stage("rendering")
         new_model = _create_model_version(project_id, reply)
         version = new_model["version"]
         if new_model["render_error"]:
@@ -203,7 +218,21 @@ def api_send_message(project_id: int, req: MessageRequest):
 @app.get("/api/jobs")
 def api_list_jobs():
     """処理中・待機中のジョブ一覧。フロントはこれを見て進捗を表示する。"""
-    return {"jobs": db.list_active_jobs()}
+    return {
+        "jobs": db.list_active_jobs(),
+        # 所要時間の目安（過去の実績の中央値）。質問だけの往復とモデリングで大きく違う。
+        "typical_seconds": {
+            "question": db.typical_duration_seconds(produced_model=False),
+            "modeling": db.typical_duration_seconds(produced_model=True),
+        },
+    }
+
+
+@app.get("/api/usage")
+def api_usage():
+    """トークン消費量。合計と、直近24時間分。"""
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    return {"total": db.usage_summary(), "last_24h": db.usage_summary(since=since)}
 
 
 @app.get("/api/jobs/{job_id}")
