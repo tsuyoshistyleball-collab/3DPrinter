@@ -1,8 +1,9 @@
 # ミニPC セットアップ手順（引き継ぎガイド）
 
 自宅のミニPCでこのアプリを常時稼働させ、スマホから使えるようにするまでの手順です。
-OS は **Ubuntu Desktop / Server 24.04 LTS** を推奨します（無料・軽量・以下の手順が
-そのまま使えます）。Windows で動かす場合は最後の補足を参照。
+
+**Windows のミニPCで動かす場合は、末尾の「Windows のミニPCで動かす場合」を参照してください**
+（専用のセットアップスクリプトがあり、検証済みです）。以下の 1〜8 は Ubuntu 24.04 LTS 向けです。
 
 ## 1. リポジトリを取得
 
@@ -101,10 +102,54 @@ cd ~/3DPrinter
 claude
 ```
 
-## 補足: Windows で動かす場合
+## Windows のミニPCで動かす場合（検証済みの手順）
 
-- Python / OpenSCAD / Bambu Studio / Tailscale / Claude Code を各公式サイトから導入
-- `pip install -r requirements.txt bambulabs_api`
-- 起動: `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- 自動起動: タスクスケジューラで「ログオン時」に上記コマンドを登録
-- `scripts/*.sh` は Linux 用のため使いません
+`scripts/*.sh` は Linux 用です。Windows では専用スクリプトを使います。
+
+### 1. 事前に入れるもの（それぞれ通常のインストーラ）
+
+- [Python 3.11+](https://www.python.org/downloads/) … インストール時に「Add to PATH」にチェック
+- [Git](https://git-scm.com/)
+- [Tailscale](https://tailscale.com/download) … 入れたらスマホと**同じアカウント**でログイン
+- Claude Code … PowerShell で `irm https://claude.ai/install.ps1 | iex` の後、`claude` を起動してMaxアカウントでログイン
+
+> `ANTHROPIC_API_KEY` を環境変数にも `.env` にも設定しないこと（あるとサブスクではなく従量課金が優先されます）。
+
+### 2. 取得してセットアップ
+
+```powershell
+git clone https://github.com/tsuyoshistyleball-collab/3DPrinter.git
+cd 3DPrinter
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1
+```
+
+このスクリプトが以下をまとめて行い、最後にスマホで開くURLを表示します:
+
+- Python仮想環境(`.venv`)と依存パッケージの導入
+- `.env` の作成
+- OpenSCAD のポータブル版を導入（管理者権限不要。`winget` 版は昇格を求められて止まることがあるため）
+- タスクスケジューラに `AIModelingKobo` を登録（**ログオン時に自動起動**）
+- Tailscale serve を設定（**tailnet内限定のHTTPS**。LAN・インターネットには公開しない）
+- アプリを起動して疎通確認
+
+以降はPCを起動してログオンするだけでアプリが立ち上がります。ログは `data\server.log`。
+手動で止める・動かすときは:
+
+```powershell
+Stop-ScheduledTask  -TaskName AIModelingKobo
+Start-ScheduledTask -TaskName AIModelingKobo
+```
+
+### 3. 常時稼働のための設定
+
+- スリープしないように: 設定 → システム → 電源 → 画面とスリープ を「なし」に
+- OneDrive 配下にリポジトリを置かないこと（同期とgitが競合します。`~\Dev\3DPrinter` などを推奨）
+
+### 4. このPCで開発を続ける
+
+`claude.exe` は `~\.local\bin` にありPATHに載っていないため、フルパスで起動します:
+
+```powershell
+cd ~\Dev\3DPrinter
+~\.local\bin\claude
+```
