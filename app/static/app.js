@@ -1,5 +1,7 @@
 // three.js（同梱）はプレビュー表示時に遅延読み込みする。
 // 万一読み込めなくてもチャットとダウンロードは動作させる。
+const APP_VERSION = '0.2.0';
+
 let THREE, STLLoader, OrbitControls;
 
 async function ensureThree() {
@@ -357,6 +359,8 @@ async function refreshPrinterStatus() {
 }
 
 // ---------- 初期化 ----------
+
+$('app-version').textContent = `v${APP_VERSION}`;
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});

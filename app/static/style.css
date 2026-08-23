@@ -20,6 +20,24 @@ body {
   overflow: hidden;
 }
 
+#app-version {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  z-index: 50;
+  padding: 4px 9px;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(6px);
+  user-select: none;
+}
+
 #layout { display: flex; height: 100vh; }
 
 /* ---------- サイドバー ---------- */
@@ -248,7 +266,7 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
     padding: 10px 12px;
     gap: 8px;
   }
-  #sidebar h1 { font-size: 16px; }
+  #sidebar h1 { font-size: 16px; padding-right: 64px; }
   #new-project-btn { padding: 8px; }
   #project-list { max-height: 132px; }
   .printer-status { padding-top: 6px; }
