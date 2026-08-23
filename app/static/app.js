@@ -43,6 +43,7 @@ const state = {
   modelOptions: ['haiku', 'sonnet', 'opus'],
   activeJobs: [],
   draftImages: [],
+  showAllProjects: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -103,6 +104,61 @@ function renderProjectList() {
     li.onclick = () => openProject(p.id);
     ul.appendChild(li);
   }
+  renderRecentProjects();
+}
+
+function projectGlyph(title, index) {
+  if (/ケーブル|コード|クリップ/.test(title)) return '⌁';
+  if (/ペン|収納|ケース/.test(title)) return '▥';
+  if (/スタンド|台|ホルダー/.test(title)) return '◩';
+  if (/フック|掛け|バイザー/.test(title)) return '∩';
+  return ['◇', '◫', '⌂'][index % 3];
+}
+
+function renderRecentProjects() {
+  const container = $('recent-projects');
+  const toggle = $('all-projects-btn');
+  container.innerHTML = '';
+
+  if (state.projects.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'recent-empty';
+    empty.textContent = 'まだプロジェクトがありません。最初のアイデアをAIに話してみましょう。';
+    container.appendChild(empty);
+    toggle.classList.add('hidden');
+    return;
+  }
+
+  toggle.classList.toggle('hidden', state.projects.length <= 3);
+  toggle.firstChild.textContent = state.showAllProjects ? '閉じる ' : 'すべて見る ';
+  const projects = state.showAllProjects ? state.projects : state.projects.slice(0, 3);
+
+  projects.forEach((project, index) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'project-card';
+    card.onclick = () => openProject(project.id);
+
+    const visual = document.createElement('span');
+    visual.className = 'project-visual';
+    const glyph = document.createElement('span');
+    glyph.className = 'project-glyph';
+    glyph.textContent = projectGlyph(project.title, index);
+    visual.appendChild(glyph);
+
+    const body = document.createElement('span');
+    body.className = 'project-card-body';
+    const title = document.createElement('span');
+    title.className = 'project-card-title';
+    title.textContent = project.title;
+    const status = document.createElement('span');
+    status.className = `status-chip status-${project.status}`;
+    status.textContent = STATUS_LABELS[project.status] ?? project.status;
+    body.append(title, status);
+
+    card.append(visual, body);
+    container.appendChild(card);
+  });
 }
 
 async function openProject(id) {
@@ -119,6 +175,7 @@ async function openProject(id) {
 
 function showWelcome() {
   state.currentId = null;
+  document.body.classList.add('home-mode');
   $('welcome').classList.remove('hidden');
   $('chat').classList.add('hidden');
   $('preview-panel').classList.add('hidden');
@@ -127,6 +184,7 @@ function showWelcome() {
 }
 
 function showChat(project) {
+  document.body.classList.remove('home-mode');
   $('welcome').classList.add('hidden');
   $('chat').classList.remove('hidden');
   $('chat-title').textContent = project.title;
@@ -449,6 +507,23 @@ $('chat-input').addEventListener('keydown', (e) => {
 });
 
 $('new-project-btn').onclick = showWelcome;
+$('brand-home').onclick = showWelcome;
+
+document.querySelectorAll('.prompt-chips button').forEach((button) => {
+  button.onclick = () => {
+    $('welcome-input').value = button.dataset.prompt;
+    $('welcome-input').focus();
+  };
+});
+
+$('all-projects-btn').onclick = () => {
+  state.showAllProjects = !state.showAllProjects;
+  renderRecentProjects();
+};
+
+$('printer-settings-btn').onclick = () => {
+  alert('プリンタ設定は .env の BAMBU_IP / BAMBU_ACCESS_CODE / BAMBU_SERIAL を編集し、アプリを再起動すると反映されます。');
+};
 
 $('delete-project-btn').onclick = async () => {
   if (state.currentId === null) return;
@@ -916,17 +991,28 @@ async function refreshPrinterStatus() {
     state.canPrint = !!s.can_print;
     if (canPrintChanged && state.currentVersion !== null) updatePrintButton();
     const el = $('printer-status');
+    const homeEl = $('home-printer-status');
+    homeEl.classList.remove('connected');
     if (!s.configured) {
       el.textContent = '🖨 プリンタ: 未設定';
       el.title = s.message ?? '';
+      homeEl.textContent = '未接続';
+      homeEl.title = s.message ?? '';
     } else if (!s.connected) {
       el.textContent = '🖨 プリンタ: 接続できません';
       el.title = s.message ?? '';
+      homeEl.textContent = '接続できません';
+      homeEl.title = s.message ?? '';
     } else {
       const progress = s.progress_percent != null ? ` ${s.progress_percent}%` : '';
       el.textContent = `🖨 P2S: ${s.state}${progress} (ノズル${s.nozzle_temperature}° / ベッド${s.bed_temperature}°)`;
+      homeEl.textContent = `${s.state}${progress}`;
+      homeEl.title = `ノズル ${s.nozzle_temperature}° / ベッド ${s.bed_temperature}°`;
+      homeEl.classList.add('connected');
     }
-  } catch { /* プリンタ状態は補助情報のため失敗しても無視 */ }
+  } catch {
+    $('home-printer-status').textContent = '状態を取得できません';
+  }
 }
 
 // ---------- 初期化 ----------
