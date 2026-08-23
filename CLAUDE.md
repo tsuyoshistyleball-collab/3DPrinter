@@ -9,6 +9,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ワンタップでスライス→プリンタ送信→印刷開始まで行う。個人利用前提（認証機能なし。公開せず
 Tailscale内で運用する）。UI・エラーメッセージ・コミットメッセージはすべて日本語。
 
+## 作業リポジトリと共同編集のルール（重要）
+
+このプロジェクトは**複数のAI（Claude / ChatGPT）が並行して触る**。作業クローンが2つある:
+
+| 場所 | 用途 | git remote 名 |
+|---|---|---|
+| `~\Dev\3DPrinter` | **本番**。常時稼働のサービスがここを動かす | 相手からは `tlab` |
+| `~\OneDrive\Desktop\T-Lab\3DPrinter` | ChatGPT 側の作業コピー | こちらからは `chatgpt` |
+
+互いの変更を潰さないための手順:
+
+1. **作業前に必ず取り込む**: `git fetch chatgpt && git log --oneline HEAD..chatgpt/<branch>`
+   で相手の新しいコミットを確認し、あれば `git cherry-pick` か `git merge` してから始める。
+2. **作業後は必ずコミットする**。未コミットのまま放置すると、相手が pull したときに消える。
+3. **同じファイルを長時間開きっぱなしにしない**。特に `app/static/index.html` と
+   `style.css` は両者が触りやすく、実際に競合した実績がある。
+4. **サーバーは1つだけ**。両方のクローンから uvicorn を起動するとポート8000を奪い合い、
+   古い方が表に出てユーザーを混乱させる。起動は本番クローンのタスク `AIModelingKobo` のみ。
+5. 画面右上のバージョンバッジ（`app/version.py` + `/api/version`）でコミットと
+   未コミット有無を確認できる。`*` が付いていたら誰かの作業が commit されていない。
+
 ## コマンド
 
 ```bash
@@ -46,8 +67,15 @@ FastAPI + SQLite + 素のJS（ビルド工程なし）。中心となる1ター�
 
 - **AIの挙動はすべて `app/ai.py` のプロンプト定数で制御**している（質問の仕方、P2Sの
   造形サイズ256mm³、FDM印刷制約、出力フォーマット）。モデリング品質の調整はここを触る。
-  共通部品（`_PRINTER_CONTEXT` / `_INTERVIEW_RULES` / `_OUTPUT_FORMAT` / `_SCAD_RULES`）から
-  `SYSTEM_PROMPT`（single用）/ `INTERVIEW_SYSTEM_PROMPT` / `MODELING_SYSTEM_PROMPT` を合成する。
+  共通部品（`_PRINTER_CONTEXT` / `_INTERVIEW_RULES` / `_QUESTION_FORMAT` / `_OUTPUT_FORMAT` /
+  `_SCAD_RULES`）から `SYSTEM_PROMPT`（single用）/ `INTERVIEW_SYSTEM_PROMPT` /
+  `MODELING_SYSTEM_PROMPT` を合成する。
+- **質問は `[QUESTIONS]` ブロック（1行 = 質問文 | 選択肢 | 選択肢…）で出させる**。
+  `ai.parse_questions()` が `{text, choices}` に変換し、`messages.questions` 列（JSON）へ
+  保存、フロントがタップ選択+手入力のフォームとして描画する。表示用テキストからは
+  ブロックを除去するため、セッションが切れて履歴を畳み直すときに質問文が失われる。
+  これを補うのが `main._history_text()`。`_QUESTION_FORMAT` の書式を変えるときは
+  `parse_questions()` と `_history_text()` も合わせて直すこと。
 - チャット履歴には表示用テキスト（SCAD除去後）だけを保存する。コード本体は
   `model_versions` テーブルと `data/models/<project_id>/v<n>.scad|.stl` に置く。
 - プロジェクトのステータス遷移は planning（相談中)→ modeled → printed の一方向。
