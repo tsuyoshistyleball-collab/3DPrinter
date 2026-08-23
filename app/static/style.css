@@ -118,21 +118,25 @@ body {
   padding-top: 8px;
 }
 
-/* 画面右上のバージョン表示。どの版が動いているかを取り違えないための目印 */
+/* 画面右上のバージョン表示。どの版が動いているかを取り違えないための目印。
+   ノッチ・パンチホールに隠れないよう safe-area を見込む。 */
 .version-badge {
   position: fixed;
-  top: 6px;
-  right: 10px;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
   z-index: 150;
-  font-size: 10.5px;
-  line-height: 1;
-  color: var(--sub);
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid var(--border);
-  border-radius: 999px;
   padding: 4px 9px;
-  pointer-events: auto;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--accent-dark);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
   white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(6px);
+  user-select: none;
 }
 .version-badge.dirty { color: #92400e; background: #fef3c7; border-color: #fde68a; }
 .version-badge:empty { display: none; }
@@ -481,7 +485,8 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
     padding: 10px 12px;
     gap: 8px;
   }
-  #sidebar h1 { font-size: 16px; }
+  /* 右上のバージョンバッジと重ならないよう右側を空ける */
+  #sidebar h1 { font-size: 16px; padding-right: 84px; }
   .app-icon { width: 24px; height: 24px; }
   .brand-icon { width: 60px; height: 60px; border-radius: 15px; }
   .brand-name { font-size: 28px; }
