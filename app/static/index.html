@@ -6,8 +6,8 @@
 <title>T-Lab</title>
 <meta name="theme-color" content="#16a34a">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/icons/icon-192.png">
-<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-ai-modeling-v2-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-ai-modeling-v2-180.png">
 <link rel="stylesheet" href="/style.css">
 <script type="importmap">
 {
@@ -22,7 +22,7 @@
 <div id="version-badge" class="version-badge" title="読み込み中…"></div>
 <div id="layout">
   <aside id="sidebar">
-    <h1>🖨️ T-Lab</h1>
+    <h1><img class="app-icon" src="/icons/icon-ai-modeling-v2-32.png" alt=""><span class="wordmark">T&#8209;Lab</span></h1>
     <button id="new-project-btn">＋ 新しく作る</button>
     <ul id="project-list"></ul>
     <button id="settings-btn" class="settings-btn" title="AIモデルの使い分けを変更">
@@ -33,6 +33,11 @@
 
   <main id="main">
     <div id="welcome" class="panel">
+      <div class="brand">
+        <img class="brand-icon" src="/icons/icon-ai-modeling-v2-192.png" alt="">
+        <div class="brand-name">T&#8209;Lab</div>
+        <div class="brand-tagline">AIと相談して、作って、印刷する</div>
+      </div>
       <h2>作りたいものは何ですか？</h2>
       <p>自由に書いてください。AIが質問しながら一緒に形にしていきます。</p>
       <p class="examples">例: 「玄関に鍵を掛けるフックが欲しい」「スマホを立てる卓上スタンド」「ケーブルをまとめるクリップ」</p>
