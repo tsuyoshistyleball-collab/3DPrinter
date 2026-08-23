@@ -33,7 +33,19 @@ body {
   padding: 16px 12px;
   gap: 12px;
 }
-#sidebar h1 { font-size: 18px; padding: 0 4px; }
+#sidebar h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  padding: 0 4px;
+}
+.app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+}
 #new-project-btn {
   background: var(--accent);
   color: #fff;
