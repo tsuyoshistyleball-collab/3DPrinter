@@ -13,7 +13,7 @@ load_dotenv()  # 他モジュールが環境変数を読む前に .env を反映
 
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -21,6 +21,24 @@ from pydantic import BaseModel
 from app import ai, db, jobs, modeling, printer, slicer, version
 
 app = FastAPI(title="T-Lab")
+
+
+@app.middleware("http")
+async def prevent_stale_app_assets(request: Request, call_next):
+    """PWAや通常ブラウザが古い画面資産を再利用しないようにする。"""
+    response = await call_next(request)
+    path = request.url.path
+    no_cache = (
+        path in ("/", "/index.html", "/sw.js", "/manifest.webmanifest", "/api/version")
+        or path.endswith((".js", ".css", ".html", ".webmanifest"))
+    )
+    if no_cache:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    if path == "/sw.js":
+        response.headers["Service-Worker-Allowed"] = "/"
+    return response
 
 db.init_db()
 jobs.start(lambda project_id, progress: _run_ai_turn(project_id, progress))

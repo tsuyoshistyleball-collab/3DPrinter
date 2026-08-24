@@ -44,7 +44,6 @@ const state = {
   activeJobs: [],
   draftImages: [],
   pendingImages: [],   // トップ画面で選んだ、まだ送っていない写真
-  showAllProjects: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -127,12 +126,13 @@ function renderRecentProjects() {
     empty.textContent = 'まだプロジェクトがありません。最初のアイデアをAIに話してみましょう。';
     container.appendChild(empty);
     toggle.classList.add('hidden');
+    $('recent-dots').innerHTML = '';
     return;
   }
 
-  toggle.classList.toggle('hidden', state.projects.length <= 3);
-  toggle.firstChild.textContent = state.showAllProjects ? '閉じる ' : 'すべて見る ';
-  const projects = state.showAllProjects ? state.projects : state.projects.slice(0, 3);
+  toggle.classList.remove('hidden');
+  toggle.firstChild.textContent = 'すべて見る ';
+  const projects = state.projects;
 
   projects.forEach((project, index) => {
     const card = document.createElement('button');
@@ -153,13 +153,37 @@ function renderRecentProjects() {
     title.className = 'project-card-title';
     title.textContent = project.title;
     const status = document.createElement('span');
-    status.className = `status-chip status-${project.status}`;
-    status.textContent = STATUS_LABELS[project.status] ?? project.status;
+    if (isBusy(project.id)) {
+      status.className = 'status-chip status-busy';
+      status.textContent = '⏳ 処理中';
+    } else {
+      status.className = `status-chip status-${project.status}`;
+      status.textContent = STATUS_LABELS[project.status] ?? project.status;
+    }
     body.append(title, status);
 
     card.append(visual, body);
     container.appendChild(card);
   });
+  requestAnimationFrame(updateRecentDots);
+}
+
+function updateRecentDots() {
+  const container = $('recent-projects');
+  const dots = $('recent-dots');
+  const maxScroll = container.scrollWidth - container.clientWidth;
+  if (maxScroll <= 4) {
+    dots.innerHTML = '';
+    return;
+  }
+
+  const pageCount = Math.min(5, Math.max(2, Math.ceil(container.scrollWidth / container.clientWidth)));
+  const active = Math.round((container.scrollLeft / maxScroll) * (pageCount - 1));
+  dots.replaceChildren(...Array.from({ length: pageCount }, (_, index) => {
+    const dot = document.createElement('span');
+    dot.classList.toggle('active', index === active);
+    return dot;
+  }));
 }
 
 // ---------- 画面遷移の履歴（スマホの戻るボタン対応）----------
@@ -651,9 +675,14 @@ document.querySelectorAll('.prompt-chips button').forEach((button) => {
 });
 
 $('all-projects-btn').onclick = () => {
-  state.showAllProjects = !state.showAllProjects;
-  renderRecentProjects();
+  const container = $('recent-projects');
+  const maxScroll = container.scrollWidth - container.clientWidth;
+  const atEnd = maxScroll - container.scrollLeft < 8;
+  container.scrollTo({ left: atEnd ? 0 : maxScroll, behavior: 'smooth' });
 };
+
+$('recent-projects').addEventListener('scroll', () => requestAnimationFrame(updateRecentDots));
+window.addEventListener('resize', () => requestAnimationFrame(updateRecentDots));
 
 $('printer-settings-btn').onclick = () => {
   alert('プリンタ設定は .env の BAMBU_IP / BAMBU_ACCESS_CODE / BAMBU_SERIAL を編集し、アプリを再起動すると反映されます。');
@@ -1157,7 +1186,16 @@ async function refreshPrinterStatus() {
 // ---------- 初期化 ----------
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  let reloadingForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+  navigator.serviceWorker
+    .register('/sw.js?v=1.3.0', { updateViaCache: 'none' })
+    .then((registration) => registration.update())
+    .catch(() => {});
 }
 
 // 履歴の土台。ここが最初のエントリになるので、会話から戻るとホームに着く。
