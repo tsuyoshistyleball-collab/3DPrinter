@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>T-Lab</title>
 <meta name="theme-color" content="#16a34a">
-<link rel="manifest" href="/manifest.webmanifest?v=1.3.1">
-<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-ai-modeling-v3-32.png?v=1.3.1">
-<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-ai-modeling-v3-180.png?v=1.3.1">
-<link rel="stylesheet" href="/style.css?v=1.3.1">
+<link rel="manifest" href="/manifest.webmanifest?v=1.4.0">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-ai-modeling-v3-32.png?v=1.4.0">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-ai-modeling-v3-180.png?v=1.4.0">
+<link rel="stylesheet" href="/style.css?v=1.4.0">
 <script type="importmap">
 {
   "imports": {
@@ -23,8 +23,8 @@
   <button id="brand-home" class="brand-home" type="button" aria-label="トップページへ戻る">
     <img
       class="app-icon"
-      src="/icons/icon-ai-modeling-v3-192.png?v=1.3.1"
-      srcset="/icons/icon-ai-modeling-v3-192.png?v=1.3.1 192w, /icons/icon-ai-modeling-v3-512.png?v=1.3.1 512w"
+      src="/icons/icon-ai-modeling-v3-192.png?v=1.4.0"
+      srcset="/icons/icon-ai-modeling-v3-192.png?v=1.4.0 192w, /icons/icon-ai-modeling-v3-512.png?v=1.4.0 512w"
       sizes="(max-width: 900px) 40px, 44px"
       alt=""
     >
@@ -56,18 +56,26 @@
           </div>
 
           <form id="welcome-form" class="idea-card hero-idea-card">
-            <label for="welcome-input"><span class="sparkle">✦</span>今日は何をつくりますか？</label>
-            <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
-            <div class="prompt-chips" aria-label="入力例">
-              <button type="button" data-prompt="玄関に鍵を掛ける壁掛けフック">壁掛けフック</button>
-              <button type="button" data-prompt="スマホを立てる卓上スタンド">スマホスタンド</button>
-              <button type="button" data-prompt="ケーブルをまとめるクリップ">ケーブルクリップ</button>
+            <div class="idea-card-meta" aria-hidden="true">
+              <span class="idea-eyebrow">NEW PROJECT</span>
+              <span class="idea-step">IDEA 01</span>
+            </div>
+            <label for="welcome-input">今日は何をつくりますか？</label>
+            <p class="idea-support">作りたいものや、困っていることを自由に話してください</p>
+            <div class="idea-composer">
+              <textarea id="welcome-input" rows="4" placeholder="作りたいものを自由に入力…"></textarea>
+              <div class="idea-composer-footer">
+                <button type="button" id="welcome-image-btn" class="attach-btn">
+                  <svg class="attach-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8.5 5 10 3.5h4L15.5 5H19a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3.5Z"/>
+                    <circle cx="12" cy="12.5" r="3.5"/>
+                  </svg>
+                  <span class="attach-label">写真を添える</span>
+                </button>
+                <span class="attach-note">用途やサイズも書けます</span>
+              </div>
             </div>
             <div id="welcome-images" class="draft-images hidden"></div>
-            <button type="button" id="welcome-image-btn" class="attach-btn">
-              <span class="attach-label">📷 写真を添える</span>
-              <span class="attach-note">設置場所を撮ると寸法の精度が上がります</span>
-            </button>
             <input type="file" id="welcome-image-input" accept="image/*" multiple hidden>
             <button class="idea-submit" type="submit"><span>✦</span> AIとつくり始める <span>→</span></button>
           </form>
@@ -201,6 +209,6 @@
   <p id="loading-text">AIが考えています…</p>
 </div>
 
-<script type="module" src="/app.js?v=1.3.1"></script>
+<script type="module" src="/app.js?v=1.4.0"></script>
 </body>
 </html>

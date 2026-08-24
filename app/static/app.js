@@ -667,13 +667,6 @@ function goHome() {
 $('new-project-btn').onclick = goHome;
 $('brand-home').onclick = goHome;
 
-document.querySelectorAll('.prompt-chips button').forEach((button) => {
-  button.onclick = () => {
-    $('welcome-input').value = button.dataset.prompt;
-    $('welcome-input').focus();
-  };
-});
-
 $('all-projects-btn').onclick = () => {
   const container = $('recent-projects');
   const maxScroll = container.scrollWidth - container.clientWidth;
@@ -1193,7 +1186,7 @@ if ('serviceWorker' in navigator) {
     location.reload();
   });
   navigator.serviceWorker
-    .register('/sw.js?v=1.3.1', { updateViaCache: 'none' })
+    .register('/sw.js?v=1.4.0', { updateViaCache: 'none' })
     .then((registration) => registration.update())
     .catch(() => {});
 }

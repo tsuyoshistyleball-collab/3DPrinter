@@ -1,4 +1,4 @@
-const APP_CACHE_VERSION = 't-lab-v1.3.1';
+const APP_CACHE_VERSION = 't-lab-v1.4.0';
 
 self.addEventListener('install', () => self.skipWaiting());
 

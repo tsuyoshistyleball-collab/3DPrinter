@@ -9,7 +9,7 @@ APP_VERSION は機能を足したときに手で上げる。git のコミット�
 import subprocess
 from pathlib import Path
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 
 _ROOT = Path(__file__).resolve().parent.parent
 
