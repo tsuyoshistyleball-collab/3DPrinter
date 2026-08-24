@@ -20,6 +20,7 @@
 </head>
 <body class="home-mode">
 <header id="topbar">
+  <button id="chat-back" class="chat-back" type="button" aria-label="プロジェクト一覧へ戻る">‹</button>
   <button id="brand-home" class="brand-home" type="button" aria-label="トップページへ戻る">
     <img class="app-icon" src="/icons/icon-ai-modeling-v3-32.png" alt="">
     <span>T-Lab</span>
@@ -77,16 +78,44 @@
       </div>
     </div>
 
-    <div id="chat" class="panel hidden">
-      <div id="chat-header">
-        <span id="chat-title"></span>
-        <span id="chat-status" class="status-chip"></span>
-        <button id="delete-project-btn" title="このプロジェクトを削除">🗑</button>
+    <div id="chat" class="hidden">
+      <div class="conversation-scroll">
+        <div class="conversation-shell">
+          <section id="chat-header" class="chat-project-card" aria-labelledby="chat-title">
+            <div class="chat-project-visual" aria-hidden="true"><span></span></div>
+            <div class="chat-project-copy">
+              <span class="chat-eyebrow">AIとつくるプロジェクト</span>
+              <h1 id="chat-title"></h1>
+            </div>
+            <span id="chat-status" class="status-chip"></span>
+            <button id="delete-project-btn" type="button" title="このプロジェクトを削除" aria-label="このプロジェクトを削除">×</button>
+          </section>
+
+          <nav id="chat-progress" class="chat-progress" aria-label="制作の進み具合">
+            <div class="progress-step" data-step="planning"><span class="progress-icon">●</span><strong>相談</strong></div>
+            <span class="progress-line"></span>
+            <div class="progress-step" data-step="modeled"><span class="progress-icon">◇</span><strong>モデル</strong></div>
+            <span class="progress-line"></span>
+            <div class="progress-step" data-step="printed"><span class="progress-icon">▣</span><strong>印刷</strong></div>
+          </nav>
+
+          <section class="chat-summary" aria-labelledby="chat-summary-title">
+            <h2 id="chat-summary-title"><span>✦</span> ここまでの内容</h2>
+            <div id="chat-summary-chips" class="chat-summary-chips"></div>
+          </section>
+
+          <div class="conversation-stage">
+            <div class="filament-line" aria-hidden="true"></div>
+            <div id="messages" aria-live="polite"></div>
+          </div>
+        </div>
       </div>
-      <div id="messages"></div>
+
       <form id="chat-form">
-        <textarea id="chat-input" rows="2" placeholder="返答や修正依頼を入力…"></textarea>
-        <button type="submit" id="send-btn">送信</button>
+        <div class="chat-composer">
+          <textarea id="chat-input" rows="1" placeholder="返答や修正依頼を入力…" aria-label="AIへの返答"></textarea>
+          <button type="submit" id="send-btn"><span aria-hidden="true">➤</span> 送信</button>
+        </div>
       </form>
     </div>
   </main>

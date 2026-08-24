@@ -36,7 +36,13 @@ SYSTEM_PROMPT = """\
 
 ## 1. ヒアリング（壁打ち）
 ユーザーの「作りたいもの」を聞いたら、モデリングに必要な情報を質問して詰めます。
-- 質問は一度に2〜4個まで。番号付きで、選択肢や推奨値を添えて答えやすくする（例:「幅はどれくらいですか？ 目安: スマホ用なら80mm程度」）。
+- 質問は一度に必ず1個だけ。最も重要なことから順に聞く。通常は合計3問以内を目安にする。
+- 質問をするときは、短い導入文の後に必ず次の形式を使う。選択肢は短く、3個目は原則「AIにおまかせ」にする。タグ名は変更しない。
+  [QUESTION 1/3]
+  取り付け方法はどれがよいですか？
+  [OPTIONS]
+  ネジ止め | 両面テープ | AIにおまかせ
+- QUESTION の数字は会話の進行に合わせて更新する。選択肢を出せない質問でも、推奨値を含む3つの回答候補を作る。
 - 聞くべきこと: 寸法、設置方法（壁掛け/置き型、ネジ/テープ）、載せる・掛ける物とその重さ、形の好み。
 - 1〜2往復で十分な情報が揃ったら設計に進む。細部を聞きすぎない。ユーザーが「おまかせ」と言ったら常識的な値で決めて設計に進む。
 
@@ -80,13 +86,21 @@ class AIReply:
 
 
 MOCK_QUESTION = """\
-いいですね！壁掛けフックを作りましょう。いくつか教えてください。
+いいですね！壁掛けフックを一緒に作りましょう。まず、掛けたい物を教えてください。
 
-1. **掛けたい物は何ですか？**（例: 鍵 / 帽子 / バッグ / ケーブル）
-2. **壁への取り付け方法は？**（A: ネジ止め / B: 両面テープ）
-3. **フックの幅の希望はありますか？** 目安: 鍵なら15mm、バッグなら25mm程度
+[QUESTION 1/3]
+何を掛けるフックですか？
+[OPTIONS]
+鍵 | バッグ | AIにおまかせ
+"""
 
-「おまかせ」と言っていただければ、汎用的な仕様で作ります。
+MOCK_MONITOR_QUESTION = """\
+いいですね。取り付け方から一緒に決めましょう。
+
+[QUESTION 1/3]
+どこを挟みますか？
+[OPTIONS]
+モニター上部 | 背面の出っ張り | AIにおまかせ
 """
 
 MOCK_MODEL = """\
@@ -151,7 +165,12 @@ class AIError(Exception):
 
 def _mock_chat(history: list[dict]) -> str:
     user_turns = sum(1 for m in history if m["role"] == "user")
-    return MOCK_QUESTION if user_turns <= 1 else MOCK_MODEL
+    if user_turns <= 1:
+        request = next((m["content"] for m in history if m["role"] == "user"), "")
+        if "モニター" in request and ("クランプ" in request or "挟" in request):
+            return MOCK_MONITOR_QUESTION
+        return MOCK_QUESTION
+    return MOCK_MODEL
 
 
 def chat(history: list[dict], claude_session_id: str | None = None) -> AIReply:

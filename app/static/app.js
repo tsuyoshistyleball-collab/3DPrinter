@@ -1,6 +1,6 @@
 // three.js（同梱）はプレビュー表示時に遅延読み込みする。
 // 万一読み込めなくてもチャットとダウンロードは動作させる。
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
 let THREE, STLLoader, OrbitControls;
 
@@ -140,6 +140,7 @@ async function openProject(id) {
 function showWelcome() {
   state.currentId = null;
   document.body.classList.add('home-mode');
+  document.body.classList.remove('chat-mode');
   $('welcome').classList.remove('hidden');
   $('chat').classList.add('hidden');
   $('preview-panel').classList.add('hidden');
@@ -149,12 +150,55 @@ function showWelcome() {
 
 function showChat(project) {
   document.body.classList.remove('home-mode');
+  document.body.classList.add('chat-mode');
   $('welcome').classList.add('hidden');
   $('chat').classList.remove('hidden');
   $('chat-title').textContent = project.title;
   const chip = $('chat-status');
   chip.className = `status-chip status-${project.status}`;
   chip.textContent = STATUS_LABELS[project.status] ?? project.status;
+  renderChatProgress(project.status);
+  renderChatSummary(project.title);
+}
+
+function renderChatProgress(status) {
+  const order = ['planning', 'modeled', 'printed'];
+  const activeIndex = Math.max(0, order.indexOf(status));
+  document.querySelectorAll('#chat-progress .progress-step').forEach((step, index) => {
+    step.classList.toggle('active', index === activeIndex);
+    step.classList.toggle('complete', index < activeIndex);
+  });
+  document.querySelectorAll('#chat-progress .progress-line').forEach((line, index) => {
+    line.classList.toggle('complete', index < activeIndex);
+  });
+}
+
+function renderChatSummary(title) {
+  const chips = [];
+  const dimension = title.match(/\d+(?:\.\d+)?\s*(?:インチ|mm|cm)/i)?.[0]?.replace(/\s/g, '');
+  if (dimension) chips.push(dimension.includes('インチ') ? `${dimension}モニター` : dimension);
+
+  const keywordRules = [
+    [/モニター|ディスプレイ/, 'モニター'],
+    [/クランプ|挟/, 'クランプ式'],
+    [/ペン.*(?:ホルダー|立て)|ペンホルダー|ペン立て/, 'ペンホルダー'],
+    [/ケーブル|コード/, 'ケーブル'],
+    [/フック|壁掛け/, '壁掛けフック'],
+    [/スタンド/, 'スタンド'],
+    [/バイザー|日除け/, 'バイザー'],
+  ];
+  for (const [pattern, label] of keywordRules) {
+    if (pattern.test(title) && !chips.some((chip) => chip.includes(label) || label.includes(chip))) chips.push(label);
+    if (chips.length === 3) break;
+  }
+  if (chips.length === 0) chips.push('AIと相談中');
+
+  const container = $('chat-summary-chips');
+  container.replaceChildren(...chips.slice(0, 3).map((label) => {
+    const chip = document.createElement('span');
+    chip.textContent = label;
+    return chip;
+  }));
 }
 
 // ---------- チャット ----------
@@ -162,17 +206,116 @@ function showChat(project) {
 function renderMessages(messages) {
   const box = $('messages');
   box.innerHTML = '';
-  for (const m of messages) appendMessage(m.role, m.content);
-  box.scrollTop = box.scrollHeight;
+  let latestAssistant = -1;
+  messages.forEach((message, index) => {
+    if (message.role === 'assistant') latestAssistant = index;
+  });
+  messages.forEach((message, index) => {
+    appendMessage(message.role, message.content, index === latestAssistant);
+  });
+  requestAnimationFrame(scrollConversationToEnd);
 }
 
-function appendMessage(role, content) {
+function appendMessage(role, content, interactive = false) {
   const box = $('messages');
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.textContent = content;
-  box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
+  const row = document.createElement('div');
+  row.className = `message-row ${role}`;
+
+  if (role === 'assistant') {
+    const avatar = document.createElement('img');
+    avatar.className = 'assistant-avatar';
+    avatar.src = '/icons/icon-ai-modeling-v3-32.png';
+    avatar.alt = 'T-Lab AI';
+    row.appendChild(avatar);
+  }
+
+  const stack = document.createElement('div');
+  stack.className = 'message-stack';
+  const parsed = role === 'assistant' ? parseQuestion(content) : null;
+  const bubbleText = parsed
+    ? [parsed.intro, interactive ? '' : parsed.question].filter(Boolean).join('\n\n')
+    : content;
+  if (bubbleText) {
+    const bubble = document.createElement('div');
+    bubble.className = `msg ${role}`;
+    bubble.textContent = cleanMarkdown(bubbleText);
+    stack.appendChild(bubble);
+  }
+  if (parsed && interactive) stack.appendChild(createQuestionCard(parsed));
+  row.appendChild(stack);
+  box.appendChild(row);
+  requestAnimationFrame(scrollConversationToEnd);
+}
+
+function scrollConversationToEnd() {
+  const scroll = document.querySelector('.conversation-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function cleanMarkdown(text) {
+  return text.replace(/\*\*(.*?)\*\*/g, '$1').trim();
+}
+
+function parseQuestion(content) {
+  const taggedQuestion = content.match(/\[QUESTION(?:\s+(\d+)\s*\/\s*(\d+))?\]\s*\n?([\s\S]*?)(?=\n\[OPTIONS\])/i);
+  const taggedOptions = content.match(/\[OPTIONS\]\s*\n?([^\n]+)/i);
+  if (!taggedQuestion || !taggedOptions) return null;
+
+  const options = taggedOptions[1].split('|').map((option) => cleanMarkdown(option)).filter(Boolean);
+  if (options.length < 2) return null;
+  const intro = content
+    .replace(taggedQuestion[0], '')
+    .replace(taggedOptions[0], '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return {
+    current: Number(taggedQuestion[1] || 1),
+    total: Number(taggedQuestion[2] || 3),
+    question: cleanMarkdown(taggedQuestion[3]),
+    options: options.slice(0, 3),
+    intro,
+  };
+}
+
+function choiceKind(option, index) {
+  if (/AI|おまかせ/.test(option)) return 'ai';
+  if (/背面|裏|後ろ/.test(option)) return 'back';
+  return index === 0 ? 'top' : 'plain';
+}
+
+function createQuestionCard(question) {
+  const card = document.createElement('section');
+  card.className = 'question-card';
+  const count = document.createElement('span');
+  count.className = 'question-count';
+  count.textContent = `質問 ${question.current} / ${question.total}`;
+  const heading = document.createElement('h2');
+  heading.textContent = question.question;
+  const choices = document.createElement('div');
+  choices.className = 'question-choices';
+
+  question.options.forEach((option, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `question-choice choice-${choiceKind(option, index)}`;
+    const visual = document.createElement('span');
+    visual.className = 'choice-visual';
+    visual.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('strong');
+    label.textContent = option;
+    button.append(visual, label);
+    button.onclick = () => {
+      $('chat-input').value = option;
+      $('chat-form').requestSubmit();
+    };
+    choices.appendChild(button);
+  });
+
+  const helper = document.createElement('p');
+  helper.className = 'question-helper';
+  helper.textContent = '迷ったら「AIにおまかせ」で、印刷しやすい形を提案します。';
+  card.append(count, heading, choices, helper);
+  return card;
 }
 
 function setLoading(on, text = 'AIが考えています…（1分ほどかかることがあります）') {
@@ -229,6 +372,7 @@ $('chat-input').addEventListener('keydown', (e) => {
 
 $('new-project-btn').onclick = showWelcome;
 $('brand-home').onclick = showWelcome;
+$('chat-back').onclick = showWelcome;
 
 document.querySelectorAll('.prompt-chips button').forEach((button) => {
   button.onclick = () => {
