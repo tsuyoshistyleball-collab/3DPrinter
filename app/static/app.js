@@ -162,6 +162,34 @@ function renderRecentProjects() {
   });
 }
 
+// ---------- 画面遷移の履歴（スマホの戻るボタン対応）----------
+// 履歴は「ホーム」と「会話」の2階層だけに保つ。別の会話へ移るときは積まずに
+// 置き換えるので、会話中に戻るボタンを押すと必ずホームへ戻る。
+let restoringFromHistory = false;
+
+function rememberView(view) {
+  if (restoringFromHistory) return;   // 戻る操作で表示した分は積み直さない
+  const current = history.state?.view;
+  if (view.view === 'project' && current === 'project') {
+    history.replaceState(view, '');   // 会話 → 別の会話は同じ階層
+  } else if (view.view !== current) {
+    history.pushState(view, '');
+  }
+}
+
+window.addEventListener('popstate', async (event) => {
+  const view = event.state ?? { view: 'home' };
+  restoringFromHistory = true;
+  try {
+    if (view.view === 'project' && view.id != null) await openProject(view.id);
+    else showWelcome();
+  } catch {
+    showWelcome();   // 消えた会話に戻ろうとした場合など
+  } finally {
+    restoringFromHistory = false;
+  }
+});
+
 async function openProject(id) {
   // 別のプロジェクトを開いたときは会話の先頭から、同じプロジェクトの読み直し
   // （AIの応答が届いた）ときは新しい応答の頭に位置を合わせる
@@ -175,6 +203,7 @@ async function openProject(id) {
   renderDraftImages();
   updateChatPending();
   refreshProjects();
+  if (switched) rememberView({ view: 'project', id });
 }
 
 function showWelcome() {
@@ -188,6 +217,7 @@ function showWelcome() {
   state.pendingImages = [];
   renderWelcomeImages();
   refreshProjects();
+  rememberView({ view: 'home' });
 }
 
 function showChat(project) {
@@ -603,8 +633,15 @@ $('chat-input').addEventListener('keydown', (e) => {
   }
 });
 
-$('new-project-btn').onclick = showWelcome;
-$('brand-home').onclick = showWelcome;
+// 会話からホームへ戻るときは履歴を積まずに1つ戻す。こうしておくと
+// 「ホーム → 会話 → ホーム」を繰り返しても履歴が伸びない。
+function goHome() {
+  if (history.state?.view === 'project') history.back();
+  else showWelcome();
+}
+
+$('new-project-btn').onclick = goHome;
+$('brand-home').onclick = goHome;
 
 document.querySelectorAll('.prompt-chips button').forEach((button) => {
   button.onclick = () => {
@@ -626,7 +663,7 @@ $('delete-project-btn').onclick = async () => {
   if (state.currentId === null) return;
   if (!confirm('このプロジェクトを削除しますか？')) return;
   await api(`/api/projects/${state.currentId}`, { method: 'DELETE' });
-  showWelcome();
+  goHome();   // 消した会話へ戻れないよう、履歴も1つ戻す
 };
 
 $('mark-printed').onclick = async () => {
@@ -1117,6 +1154,9 @@ async function refreshPrinterStatus() {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+
+// 履歴の土台。ここが最初のエントリになるので、会話から戻るとホームに着く。
+history.replaceState({ view: 'home' }, '');
 
 refreshProjects();
 refreshSettings();
