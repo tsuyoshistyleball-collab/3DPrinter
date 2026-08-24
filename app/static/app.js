@@ -1,6 +1,6 @@
 // three.js（同梱）はプレビュー表示時に遅延読み込みする。
 // 万一読み込めなくてもチャットとダウンロードは動作させる。
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 
 let THREE, STLLoader, OrbitControls;
 
@@ -28,7 +28,6 @@ const state = {
   models: [],
   currentVersion: null,
   canPrint: false,
-  showAllProjects: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -93,12 +92,13 @@ function renderRecentProjects() {
     empty.textContent = 'まだプロジェクトがありません。最初のアイデアをAIに話してみましょう。';
     container.appendChild(empty);
     toggle.classList.add('hidden');
+    $('recent-dots').innerHTML = '';
     return;
   }
 
-  toggle.classList.toggle('hidden', state.projects.length <= 3);
-  toggle.firstChild.textContent = state.showAllProjects ? '閉じる ' : 'すべて見る ';
-  const projects = state.showAllProjects ? state.projects : state.projects.slice(0, 3);
+  toggle.classList.remove('hidden');
+  toggle.firstChild.textContent = 'すべて見る ';
+  const projects = state.projects;
 
   projects.forEach((project, index) => {
     const card = document.createElement('button');
@@ -126,6 +126,25 @@ function renderRecentProjects() {
     card.append(visual, body);
     container.appendChild(card);
   });
+  requestAnimationFrame(updateRecentDots);
+}
+
+function updateRecentDots() {
+  const container = $('recent-projects');
+  const dots = $('recent-dots');
+  const maxScroll = container.scrollWidth - container.clientWidth;
+  if (maxScroll <= 4) {
+    dots.innerHTML = '';
+    return;
+  }
+
+  const pageCount = Math.min(5, Math.max(2, Math.ceil(container.scrollWidth / container.clientWidth)));
+  const active = Math.round((container.scrollLeft / maxScroll) * (pageCount - 1));
+  dots.replaceChildren(...Array.from({ length: pageCount }, (_, index) => {
+    const dot = document.createElement('span');
+    dot.classList.toggle('active', index === active);
+    return dot;
+  }));
 }
 
 async function openProject(id) {
@@ -382,9 +401,14 @@ document.querySelectorAll('.prompt-chips button').forEach((button) => {
 });
 
 $('all-projects-btn').onclick = () => {
-  state.showAllProjects = !state.showAllProjects;
-  renderRecentProjects();
+  const container = $('recent-projects');
+  const maxScroll = container.scrollWidth - container.clientWidth;
+  const atEnd = maxScroll - container.scrollLeft < 8;
+  container.scrollTo({ left: atEnd ? 0 : maxScroll, behavior: 'smooth' });
 };
+
+$('recent-projects').addEventListener('scroll', () => requestAnimationFrame(updateRecentDots));
+window.addEventListener('resize', () => requestAnimationFrame(updateRecentDots));
 
 $('printer-settings-btn').onclick = () => {
   alert('プリンタ設定は .env の BAMBU_IP / BAMBU_ACCESS_CODE / BAMBU_SERIAL を編集し、アプリを再起動すると反映されます。');

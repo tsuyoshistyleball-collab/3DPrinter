@@ -214,10 +214,20 @@ body.chat-mode #main {
   background-size: 66px 66px;
   mask-image: linear-gradient(90deg, transparent 15%, #000 65%);
 }
-.hero-copy {
+.hero-inner {
+  position: relative;
+  z-index: 1;
   width: min(1180px, 100%);
+  min-height: 500px;
   margin: 0 auto;
-  padding: 76px 6vw 170px;
+  padding: 54px 4vw 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(430px, 1.1fr);
+  align-items: center;
+  gap: clamp(28px, 4vw, 68px);
+}
+.hero-copy {
+  min-width: 0;
   color: white;
 }
 .hero-kicker {
@@ -259,8 +269,8 @@ body.chat-mode #main {
   position: relative;
   z-index: 2;
   width: min(1100px, 100%);
-  margin: -112px auto 0;
-  padding: 0 24px 56px;
+  margin: 0 auto;
+  padding: 32px 24px 56px;
 }
 .idea-card {
   display: flex;
@@ -272,6 +282,15 @@ body.chat-mode #main {
   background: rgba(255, 255, 255, 0.97);
   box-shadow: var(--shadow);
 }
+.hero-idea-card {
+  width: min(100%, 540px);
+  justify-self: end;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 22px 52px rgba(0, 30, 24, 0.3);
+  backdrop-filter: blur(18px);
+}
+.hero-idea-card .prompt-chips { flex-wrap: nowrap; }
+.hero-idea-card .prompt-chips button { flex: 1 1 0; min-width: 0; }
 .idea-card label {
   display: flex;
   align-items: center;
@@ -336,7 +355,7 @@ body.chat-mode #main {
   transition: 0.2s ease;
 }
 .idea-submit:hover { transform: translateY(-1px); filter: brightness(1.04); }
-.recent-section { margin-top: 38px; }
+.recent-section { margin-top: 0; }
 .section-heading {
   display: flex;
   align-items: center;
@@ -364,9 +383,18 @@ body.chat-mode #main {
 }
 .recent-projects {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(250px, 30%);
+  grid-template-columns: none;
   gap: 16px;
+  overflow-x: auto;
+  padding: 2px 3px 14px;
+  scroll-padding-inline: 3px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
 }
+.recent-projects::-webkit-scrollbar { display: none; }
 .project-card {
   min-width: 0;
   padding: 0;
@@ -380,6 +408,7 @@ body.chat-mode #main {
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(8, 55, 40, 0.07);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  scroll-snap-align: start;
 }
 .project-card:hover { transform: translateY(-3px); box-shadow: 0 15px 34px rgba(8, 55, 40, 0.12); }
 .project-visual {
@@ -429,6 +458,21 @@ body.chat-mode #main {
   white-space: nowrap;
 }
 .project-card .status-chip { display: inline-flex; }
+.recent-dots {
+  min-height: 9px;
+  margin-top: 7px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.recent-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #cbd5cf;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+.recent-dots span.active { width: 20px; background: var(--accent); }
 .recent-empty {
   grid-column: 1 / -1;
   padding: 32px;
@@ -1020,7 +1064,7 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
   .panel { padding: 14px 12px; }
   .hero {
-    min-height: 520px;
+    min-height: 680px;
     border-radius: 0 0 30px 30px;
     background-image:
       linear-gradient(180deg, rgba(2, 34, 29, 0.9) 0%, rgba(3, 49, 40, 0.58) 47%, rgba(3, 49, 40, 0.1) 100%),
@@ -1028,11 +1072,24 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
     background-position: center, 69% center;
     background-size: cover, auto 100%;
   }
-  .hero-copy { padding: 47px 22px 210px; }
+  .hero-inner {
+    min-height: 680px;
+    display: block;
+    padding: 0;
+  }
+  .hero-copy { padding: 44px 22px 0; }
+  .hero-idea-card {
+    position: absolute;
+    right: 12px;
+    bottom: 18px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+  }
   .hero-kicker { margin-bottom: 14px; font-size: 9px; }
   .hero h1 { max-width: 340px; font-size: clamp(39px, 12vw, 52px); }
   .hero p { max-width: 310px; margin-top: 16px; font-size: 14px; }
-  .welcome-content { margin-top: -92px; padding: 0 12px 38px; }
+  .welcome-content { margin-top: 0; padding: 28px 12px 38px; }
   .idea-card { gap: 12px; padding: 18px; border-radius: 22px; }
   .idea-card label { font-size: 19px; }
   .sparkle { width: 30px; height: 30px; font-size: 15px; }
@@ -1040,7 +1097,7 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
   .prompt-chips { gap: 7px; }
   .prompt-chips button { flex-basis: calc(50% - 4px); min-height: 40px; padding: 7px 9px; font-size: 11px; }
   .idea-submit { min-height: 52px; font-size: 15px; }
-  .recent-section { margin-top: 30px; }
+  .recent-section { margin-top: 0; }
   .section-heading h2 { font-size: 18px; }
   .recent-projects {
     grid-auto-flow: column;
@@ -1116,8 +1173,76 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
   #viewer { height: 250px; }
 }
 
+/* Galaxy Z Foldなど、展開時の中間幅はヒーローを2カラムにする */
+@media (min-width: 540px) and (max-width: 900px) {
+  .hero {
+    min-height: 440px;
+    border-radius: 0;
+    background-image:
+      linear-gradient(90deg, rgba(2, 34, 29, 0.95) 0%, rgba(3, 49, 40, 0.7) 42%, rgba(3, 49, 40, 0.16) 100%),
+      url('/images/hero-maker-v1.jpg');
+    background-position: center, 68% center;
+    background-size: cover, auto 100%;
+  }
+  .hero-inner {
+    min-height: 440px;
+    padding: 28px 18px 32px;
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(280px, 1.1fr);
+    align-items: center;
+    gap: 16px;
+  }
+  .hero-copy { padding: 0; }
+  .hero-kicker { margin-bottom: 11px; font-size: 8px; }
+  .hero h1 { max-width: 260px; font-size: clamp(30px, 5.6vw, 37px); line-height: 1.13; }
+  .hero p { max-width: 260px; margin-top: 14px; font-size: 11px; line-height: 1.7; }
+  .hero-idea-card {
+    position: static;
+    width: 100%;
+    max-width: none;
+    padding: 16px;
+    gap: 10px;
+    border-radius: 21px;
+  }
+  .hero-idea-card label { gap: 8px; font-size: 16px; }
+  .hero-idea-card .sparkle { width: 28px; height: 28px; font-size: 14px; }
+  .hero-idea-card textarea { min-height: 88px; padding: 12px; border-radius: 14px; font-size: 12px; }
+  .hero-idea-card .prompt-chips { flex-wrap: nowrap; gap: 6px; }
+  .hero-idea-card .prompt-chips button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 4px;
+    font-size: 9px;
+    white-space: nowrap;
+  }
+  .hero-idea-card .idea-submit { min-height: 44px; border-radius: 13px; font-size: 13px; }
+  .welcome-content {
+    width: 100%;
+    max-width: none;
+    margin-top: -18px;
+    padding: 34px 18px 38px;
+    border-radius: 38px 38px 0 0;
+    background: linear-gradient(180deg, #fffefb, #f8fbf9);
+    box-shadow: 0 -12px 34px rgba(2, 40, 31, 0.1);
+  }
+  .section-heading { margin-bottom: 13px; }
+  .section-heading h2 { font-size: 17px; }
+  .recent-projects {
+    grid-auto-columns: minmax(160px, 29%);
+    gap: 12px;
+    padding-bottom: 10px;
+  }
+  .project-visual { height: 108px; }
+  .project-glyph { width: 62px; height: 62px; border-radius: 19px 19px 22px 22px; font-size: 32px; }
+  .project-card-body { padding: 12px; }
+  .project-card-title { margin-bottom: 8px; font-size: 12px; }
+  .project-card .status-chip { font-size: 9px; padding: 3px 7px; }
+}
+
 @media (max-width: 430px) {
-  .hero { min-height: 500px; background-position: center, 66% center; }
+  .hero { min-height: 680px; background-position: center, 66% center; }
+  .hero-inner { min-height: 680px; }
   .hero-copy { padding-top: 40px; }
   .home-printer-card { grid-template-columns: auto 1fr; }
   #printer-settings-btn { grid-column: 1 / -1; width: 100%; }

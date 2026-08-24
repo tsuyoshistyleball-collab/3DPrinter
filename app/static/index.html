@@ -40,31 +40,34 @@
   <main id="main">
     <div id="welcome">
       <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <span class="hero-kicker">AI × 3D PRINTING</span>
-          <h1 id="hero-title">つくりたい、を<br><em>話す</em>だけ。</h1>
-          <p>AIと相談して、形にして、印刷する。</p>
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <span class="hero-kicker">AI × 3D PRINTING</span>
+            <h1 id="hero-title">つくりたい、を<br><em>話す</em>だけ。</h1>
+            <p>AIと相談して、形にして、印刷する。</p>
+          </div>
+
+          <form id="welcome-form" class="idea-card hero-idea-card">
+            <label for="welcome-input"><span class="sparkle">✦</span>今日は何をつくりますか？</label>
+            <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
+            <div class="prompt-chips" aria-label="入力例">
+              <button type="button" data-prompt="玄関に鍵を掛ける壁掛けフック">壁掛けフック</button>
+              <button type="button" data-prompt="スマホを立てる卓上スタンド">スマホスタンド</button>
+              <button type="button" data-prompt="ケーブルをまとめるクリップ">ケーブルクリップ</button>
+            </div>
+            <button class="idea-submit" type="submit"><span>✦</span> AIとつくり始める <span>→</span></button>
+          </form>
         </div>
       </section>
 
       <div class="welcome-content">
-        <form id="welcome-form" class="idea-card">
-          <label for="welcome-input"><span class="sparkle">✦</span>今日は何をつくりますか？</label>
-          <textarea id="welcome-input" rows="3" placeholder="作りたいものを自由に入力…"></textarea>
-          <div class="prompt-chips" aria-label="入力例">
-            <button type="button" data-prompt="玄関に鍵を掛ける壁掛けフック">壁掛けフック</button>
-            <button type="button" data-prompt="スマホを立てる卓上スタンド">スマホスタンド</button>
-            <button type="button" data-prompt="ケーブルをまとめるクリップ">ケーブルクリップ</button>
-          </div>
-          <button class="idea-submit" type="submit"><span>✦</span> AIとつくり始める <span>→</span></button>
-        </form>
-
         <section class="recent-section" aria-labelledby="recent-title">
           <div class="section-heading">
-            <h2 id="recent-title"><span>◇</span>最近のプロジェクト</h2>
+            <h2 id="recent-title"><span>◇</span>最近モデリングしたもの</h2>
             <button id="all-projects-btn" type="button">すべて見る <span>›</span></button>
           </div>
           <div id="recent-projects" class="recent-projects"></div>
+          <div id="recent-dots" class="recent-dots" aria-hidden="true"></div>
         </section>
 
         <section class="home-printer-card" aria-label="プリンタの状態">
