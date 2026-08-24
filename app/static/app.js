@@ -836,13 +836,15 @@ async function refreshSettings() {
   renderConfigLabel();
 }
 
+// 画面には出さず、設定ボタンにマウスを載せたときだけ現在のモデルが分かるようにする
 function renderConfigLabel() {
   const s = state.settings;
-  $('ai-config').textContent = !s
-    ? '設定'
+  const detail = !s
+    ? ''
     : s.model_mode === 'split'
-      ? `質問 ${s.interview_model} / 造形 ${s.modeling_model}`
-      : `モデル ${s.modeling_model}`;
+      ? `（質問 ${s.interview_model} / 造形 ${s.modeling_model}）`
+      : `（モデル ${s.modeling_model}）`;
+  $('settings-btn').title = `設定${detail}`;
 }
 
 function fillModelSelect(select, selected) {
@@ -925,6 +927,9 @@ function openSettings() {
   fillModelSelect($('interview-model'), s.interview_model);
   fillModelSelect($('modeling-model'), s.modeling_model);
   $('web-search').checked = s.web_search !== false;
+  $('settings-current').textContent = s.model_mode === 'split'
+    ? `いまは 質問を ${s.interview_model}、モデリングを ${s.modeling_model} が担当しています。`
+    : `いまは ${s.modeling_model} が質問もモデリングも担当しています。`;
   updateSettingsMode();
   $('settings-note').textContent = BACKEND_NOTES[state.backend] ?? '';
   $('settings-modal').classList.remove('hidden');

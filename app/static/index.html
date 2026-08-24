@@ -24,7 +24,10 @@
     <img class="app-icon" src="/icons/icon-ai-modeling-v3-32.png" alt="">
     <span class="wordmark">T&#8209;Lab</span>
   </button>
-  <div id="version-badge" class="version-badge" title="読み込み中…"></div>
+  <div class="topbar-actions">
+    <div id="version-badge" class="version-badge" title="読み込み中…"></div>
+    <button id="settings-btn" class="settings-btn" type="button" aria-label="設定" title="設定">⚙</button>
+  </div>
 </header>
 <div id="layout">
   <aside id="sidebar">
@@ -33,9 +36,6 @@
       <button id="new-project-btn">＋ 新しく作る</button>
     </div>
     <ul id="project-list"></ul>
-    <button id="settings-btn" class="settings-btn" title="AIモデルの使い分けを変更">
-      ⚙ <span id="ai-config">設定</span>
-    </button>
     <div id="printer-status" class="printer-status" title="プリンタの状態"></div>
   </aside>
 
@@ -134,6 +134,7 @@
 
     <section class="setting-group">
       <h3>AIモデルの使い分け</h3>
+      <p class="hint" id="settings-current"></p>
       <label class="radio">
         <input type="radio" name="model-mode" value="split">
         <span>
