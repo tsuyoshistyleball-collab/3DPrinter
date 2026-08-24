@@ -28,6 +28,9 @@ jobs.start(lambda project_id, progress: _run_ai_turn(project_id, progress))
 
 class NewProjectRequest(BaseModel):
     message: str
+    # 写真を添えてから相談を始めたい場合は false にして、画像の登録後に
+    # /start を呼ぶ。写真は先にプロジェクトが無いとアップロードできないため。
+    start: bool = True
 
 
 class MessageRequest(BaseModel):
@@ -201,9 +204,24 @@ def api_create_project(req: NewProjectRequest):
     title = message if len(message) <= 30 else message[:30] + "…"
     project = db.create_project(title)
     message_id = db.add_message(project["id"], "user", message)
+    if not req.start:
+        # 写真の登録を待つ。AIはまだ動かさない。
+        return {"project": db.get_project(project["id"]), "job": None}
     db.attach_to_message(project["id"], message_id)
     job = jobs.enqueue(project["id"])
     return {"project": db.get_project(project["id"]), "job": job}
+
+
+@app.post("/api/projects/{project_id}/start")
+def api_start_project(project_id: int):
+    """写真の登録が終わったプロジェクトのAI応答を開始する。"""
+    _project_or_404(project_id)
+    messages = db.list_messages(project_id)
+    user_messages = [m for m in messages if m["role"] == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="発言がありません")
+    db.attach_to_message(project_id, user_messages[-1]["id"])
+    return {"job": jobs.enqueue(project_id), "project": db.get_project(project_id)}
 
 
 @app.get("/api/projects/{project_id}")

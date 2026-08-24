@@ -43,6 +43,7 @@ const state = {
   modelOptions: ['haiku', 'sonnet', 'opus'],
   activeJobs: [],
   draftImages: [],
+  pendingImages: [],   // トップ画面で選んだ、まだ送っていない写真
   showAllProjects: false,
 };
 
@@ -183,6 +184,9 @@ function showWelcome() {
   $('chat').classList.add('hidden');
   $('preview-panel').classList.add('hidden');
   $('welcome-input').value = '';
+  for (const image of state.pendingImages) URL.revokeObjectURL(image.previewUrl);
+  state.pendingImages = [];
+  renderWelcomeImages();
   refreshProjects();
 }
 
@@ -232,8 +236,10 @@ function renderMessages(messages, scrollTo = 'top') {
   });
 
   if (scrollTo === 'latest' && lastReply) {
-    // 新しい応答は「途中から」ではなく頭から読めるよう、その位置に合わせる
-    box.scrollTop = lastReply.offsetTop - box.offsetTop;
+    // 新しい応答は途中からではなく頭から読めるよう、その位置に合わせる。
+    // ただし1画面目に収まっているなら動かさない（短い会話で自分の発言を隠さない）。
+    const replyTop = lastReply.offsetTop - box.offsetTop;
+    box.scrollTop = replyTop < box.clientHeight ? 0 : replyTop;
   } else {
     box.scrollTop = 0;
   }
@@ -367,6 +373,71 @@ $('image-input').onchange = async (e) => {
   await uploadImages(files);
 };
 
+// --- トップ画面の写真 ---
+// ここではまだプロジェクトが無いので、送信するまでブラウザ内に保持しておく。
+// （相談をやめた場合にサーバーへ孤児ファイルを残さないため）
+
+function renderWelcomeImages() {
+  const box = $('welcome-images');
+  box.innerHTML = '';
+  box.classList.toggle('hidden', state.pendingImages.length === 0);
+  state.pendingImages.forEach((image, index) => {
+    const card = document.createElement('div');
+    card.className = 'draft-image';
+
+    const thumb = document.createElement('img');
+    thumb.src = image.previewUrl;
+    thumb.alt = '';
+    card.appendChild(thumb);
+
+    const note = document.createElement('input');
+    note.type = 'text';
+    note.className = 'draft-note';
+    note.placeholder = 'この写真の説明（例: ここに掛けたい）';
+    note.value = image.note;
+    note.oninput = () => { image.note = note.value; };
+    card.appendChild(note);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'draft-remove';
+    remove.textContent = '✕';
+    remove.title = 'この写真を外す';
+    remove.onclick = () => {
+      URL.revokeObjectURL(image.previewUrl);
+      state.pendingImages.splice(index, 1);
+      renderWelcomeImages();
+    };
+    card.appendChild(remove);
+
+    box.appendChild(card);
+  });
+}
+
+async function uploadPendingImages(projectId) {
+  for (const image of state.pendingImages) {
+    try {
+      const blob = await shrinkImage(image.file);
+      const form = new FormData();
+      form.append('file', blob, 'photo.jpg');
+      form.append('note', image.note ?? '');
+      await fetch(`/api/projects/${projectId}/images`, { method: 'POST', body: form });
+    } catch { /* 1枚失敗しても相談自体は続ける */ }
+    URL.revokeObjectURL(image.previewUrl);
+  }
+  state.pendingImages = [];
+  renderWelcomeImages();
+}
+
+$('welcome-image-btn').onclick = () => $('welcome-image-input').click();
+$('welcome-image-input').onchange = (e) => {
+  for (const file of e.target.files) {
+    state.pendingImages.push({ file, note: '', previewUrl: URL.createObjectURL(file) });
+  }
+  e.target.value = '';
+  renderWelcomeImages();
+};
+
 // ---------- 質問への回答フォーム ----------
 
 function buildQuestionForm(questions) {
@@ -472,13 +543,23 @@ $('welcome-form').onsubmit = async (e) => {
   e.preventDefault();
   const message = $('welcome-input').value.trim();
   if (!message) return;
-  const btn = e.target.querySelector('button');
+  const btn = $('welcome-form').querySelector('.idea-submit');
   btn.disabled = true;
+  const withImages = state.pendingImages.length > 0;
   try {
-    // AI応答はサーバー側のキューで処理されるので、ここでは待たない
-    const data = await api('/api/projects', { method: 'POST', body: JSON.stringify({ message }) });
-    trackJob(data.job);
-    await openProject(data.project.id);
+    // 写真がある場合は、登録し終えてからAIを動かす（1通目から写真を見せるため）
+    const data = await api('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({ message, start: !withImages }),
+    });
+    const projectId = data.project.id;
+    let job = data.job;
+    if (withImages) {
+      await uploadPendingImages(projectId);
+      job = (await api(`/api/projects/${projectId}/start`, { method: 'POST' })).job;
+    }
+    trackJob(job);
+    await openProject(projectId);
   } catch (err) {
     alert(err.message);
   } finally {

@@ -668,6 +668,30 @@ textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
 }
 .icon-btn:hover { background: #f3f4f6; }
 
+/* トップ画面の「写真を添える」 */
+.attach-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 1px dashed rgba(22, 163, 74, 0.4);
+  border-radius: 12px;
+  padding: 11px 14px;
+  background: #f6fbf8;
+  color: var(--accent-dark);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.attach-btn:hover { background: #eef8f2; border-color: var(--accent); }
+.attach-btn span {
+  color: var(--sub);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
 /* ---------- 参考画像 ---------- */
 .draft-images { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
 .draft-image {
